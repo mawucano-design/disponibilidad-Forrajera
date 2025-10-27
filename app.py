@@ -13,175 +13,135 @@ import io
 from shapely.geometry import Polygon
 import math
 
-# =================================================================
-# CONFIGURACIÓN INICIAL - PREVENCIÓN DE ERRORES
-# =================================================================
-
-# Configuración de página CON session state management
-st.set_page_config(
-    page_title="🌱 Ganadería Regenerativa Voisin", 
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# ✅ SOLUCIÓN: Inicializar session state para evitar el error
-if 'file_processed' not in st.session_state:
-    st.session_state.file_processed = False
-if 'analysis_done' not in st.session_state:
-    st.session_state.analysis_done = False
-if 'current_file' not in st.session_state:
-    st.session_state.current_file = None
-if 'execution_count' not in st.session_state:
-    st.session_state.execution_count = 0
-
-# ✅ SOLUCIÓN: Función para limpiar estado
-def reset_analysis():
-    st.session_state.analysis_done = False
-    st.session_state.file_processed = False
-    st.session_state.current_file = None
-    st.rerun()
-
-# ✅ SOLUCIÓN: Función para limpiar cache de matplotlib
-def clear_matplotlib_cache():
-    plt.close('all')
-    import matplotlib
-    matplotlib.rcParams.update(matplotlib.rcParamsDefault)
-
-# Título principal
-st.title("🌱 SISTEMA DE GANADERÍA REGENERATIVA - METODOLOGÍA VOISIN")
+st.set_page_config(page_title="🌱 Analizador Forrajero GEE", layout="wide")
+st.title("🌱 ANALIZADOR FORRAJERO - METODOLOGÍA GEE")
 st.markdown("---")
 
-# =================================================================
-# PARÁMETROS DEL SISTEMA
-# =================================================================
+# Configurar para restaurar .shx automáticamente
+os.environ['SHAPE_RESTORE_SHX'] = 'YES'
 
+# Sidebar
+with st.sidebar:
+    st.header("⚙️ Configuración")
+    
+    tipo_pastura = st.selectbox("Tipo de Pastura:", 
+                               ["ALFALFA", "RAYGRASS", "FESTUCA", "AGROPIRRO", "PASTIZAL_NATURAL"])
+    
+    st.subheader("📊 Parámetros Ganaderos")
+    peso_promedio = st.slider("Peso promedio animal (kg):", 300, 600, 450)
+    carga_animal = st.slider("Carga animal (cabezas):", 50, 1000, 100)
+    
+    st.subheader("🎯 División de Potrero")
+    n_divisiones = st.slider("Número de sub-lotes:", min_value=12, max_value=32, value=24)
+    
+    st.subheader("📤 Subir Lote")
+    uploaded_zip = st.file_uploader("Subir ZIP con shapefile del potrero", type=['zip'])
+
+# PARÁMETROS FORRAJEROS POR TIPO DE PASTURA - MEJORADOS CON DETECCIÓN DE SUELO
 PARAMETROS_FORRAJEROS = {
     'ALFALFA': {
         'MS_POR_HA_OPTIMO': 4000,
         'CRECIMIENTO_DIARIO': 80,
-        'CONSUMO_VACA_DIA': 12,
+        'CONSUMO_PORCENTAJE_PESO': 0.03,
         'DIGESTIBILIDAD': 0.65,
         'PROTEINA_CRUDA': 0.18,
-        'FACTOR_BIOMASA_NDVI': 2500,
-        'FACTOR_BIOMASA_EVI': 2800,
-        'FACTOR_BIOMASA_SAVI': 2600,
-        'OFFSET_BIOMASA': -800
+        'TASA_UTILIZACION_RECOMENDADA': 0.65,
+        'FACTOR_BIOMASA_NDVI': 2800,
+        'FACTOR_BIOMASA_EVI': 3000,
+        'FACTOR_BIOMASA_SAVI': 2900,
+        'OFFSET_BIOMASA': -600,
+        'UMBRAL_NDVI': 0.25,
+        'UMBRAL_BSI': 0.3,
+        'UMBRAL_NDBI': 0.1,
+        'FACTOR_COBERTURA': 0.8
     },
     'RAYGRASS': {
         'MS_POR_HA_OPTIMO': 3500,
         'CRECIMIENTO_DIARIO': 70,
-        'CONSUMO_VACA_DIA': 10,
+        'CONSUMO_PORCENTAJE_PESO': 0.028,
         'DIGESTIBILIDAD': 0.70,
         'PROTEINA_CRUDA': 0.15,
-        'FACTOR_BIOMASA_NDVI': 2200,
-        'FACTOR_BIOMASA_EVI': 2500,
-        'FACTOR_BIOMASA_SAVI': 2300,
-        'OFFSET_BIOMASA': -700
+        'TASA_UTILIZACION_RECOMENDADA': 0.60,
+        'FACTOR_BIOMASA_NDVI': 2500,
+        'FACTOR_BIOMASA_EVI': 2700,
+        'FACTOR_BIOMASA_SAVI': 2600,
+        'OFFSET_BIOMASA': -500,
+        'UMBRAL_NDVI': 0.30,
+        'UMBRAL_BSI': 0.25,
+        'UMBRAL_NDBI': 0.08,
+        'FACTOR_COBERTURA': 0.85
     },
     'FESTUCA': {
         'MS_POR_HA_OPTIMO': 3000,
         'CRECIMIENTO_DIARIO': 50,
-        'CONSUMO_VACA_DIA': 9,
+        'CONSUMO_PORCENTAJE_PESO': 0.025,
         'DIGESTIBILIDAD': 0.60,
         'PROTEINA_CRUDA': 0.12,
-        'FACTOR_BIOMASA_NDVI': 2000,
-        'FACTOR_BIOMASA_EVI': 2300,
-        'FACTOR_BIOMASA_SAVI': 2100,
-        'OFFSET_BIOMASA': -600
+        'TASA_UTILIZACION_RECOMENDADA': 0.55,
+        'FACTOR_BIOMASA_NDVI': 2200,
+        'FACTOR_BIOMASA_EVI': 2400,
+        'FACTOR_BIOMASA_SAVI': 2300,
+        'OFFSET_BIOMASA': -400,
+        'UMBRAL_NDVI': 0.35,
+        'UMBRAL_BSI': 0.2,
+        'UMBRAL_NDBI': 0.06,
+        'FACTOR_COBERTURA': 0.75
     },
     'AGROPIRRO': {
         'MS_POR_HA_OPTIMO': 2800,
         'CRECIMIENTO_DIARIO': 45,
-        'CONSUMO_VACA_DIA': 8,
+        'CONSUMO_PORCENTAJE_PESO': 0.022,
         'DIGESTIBILIDAD': 0.55,
         'PROTEINA_CRUDA': 0.10,
-        'FACTOR_BIOMASA_NDVI': 1800,
-        'FACTOR_BIOMASA_EVI': 2100,
-        'FACTOR_BIOMASA_SAVI': 1900,
-        'OFFSET_BIOMASA': -500
+        'TASA_UTILIZACION_RECOMENDADA': 0.50,
+        'FACTOR_BIOMASA_NDVI': 2000,
+        'FACTOR_BIOMASA_EVI': 2200,
+        'FACTOR_BIOMASA_SAVI': 2100,
+        'OFFSET_BIOMASA': -300,
+        'UMBRAL_NDVI': 0.40,
+        'UMBRAL_BSI': 0.15,
+        'UMBRAL_NDBI': 0.04,
+        'FACTOR_COBERTURA': 0.70
     },
-    'MEZCLA_NATURAL': {
+    'PASTIZAL_NATURAL': {
         'MS_POR_HA_OPTIMO': 2500,
-        'CRECIMIENTO_DIARIO': 40,
-        'CONSUMO_VACA_DIA': 7,
+        'CRECIMIENTO_DIARIO': 20,
+        'CONSUMO_PORCENTAJE_PESO': 0.020,
         'DIGESTIBILIDAD': 0.50,
         'PROTEINA_CRUDA': 0.08,
-        'FACTOR_BIOMASA_NDVI': 1500,
-        'FACTOR_BIOMASA_EVI': 1800,
-        'FACTOR_BIOMASA_SAVI': 1600,
-        'OFFSET_BIOMASA': -400
+        'TASA_UTILIZACION_RECOMENDADA': 0.45,
+        'FACTOR_BIOMASA_NDVI': 1800,
+        'FACTOR_BIOMASA_EVI': 2000,
+        'FACTOR_BIOMASA_SAVI': 1900,
+        'OFFSET_BIOMASA': -200,
+        'UMBRAL_NDVI': 0.45,
+        'UMBRAL_BSI': 0.1,
+        'UMBRAL_NDBI': 0.02,
+        'FACTOR_COBERTURA': 0.60
     }
 }
 
-PARAMETROS_VOISIN = {
-    'CONSUMO_DIARIO_VACA': 12,
-    'PESO_PROMEDIO_VACA': 450,
-    'EQUIVALENCIA_VACA': 450,
-    'EFICIENCIA_COSECHA': 0.25,
-    'PERDIDAS': 0.30,
-    'PERIODO_DESCANSO': 35,
-    'DIAS_MAXIMO_PASTOREO': 3,
-    'UMBRAL_NDVI': 0.2
-}
-
+# PALETAS GEE PARA ANÁLISIS FORRAJERO
 PALETAS_GEE = {
-    'ESTADO': ['#d73027', '#fdae61', '#a1dab4', '#1a9641', '#006837'],
-    'EVHA': ['#d73027', '#fc8d59', '#fee08b', '#d9ef8b', '#91cf60'],
-    'DIAS_PERMANENCIA': ['#ffffcc', '#a1dab4', '#41b6c4', '#2c7fb8', '#253494']
+    'PRODUCTIVIDAD': ['#8c510a', '#bf812d', '#dfc27d', '#f6e8c3', '#c7eae5', '#80cdc1', '#35978f', '#01665e'],
+    'DISPONIBILIDAD': ['#d73027', '#f46d43', '#fdae61', '#fee08b', '#d9ef8b', '#a6d96a', '#66bd63', '#1a9850'],
+    'DIAS_PERMANENCIA': ['#4575b4', '#74add1', '#abd9e9', '#e0f3f8', '#fee090', '#fdae61', '#f46d43', '#d73027'],
+    'COBERTURA': ['#d73027', '#fc8d59', '#fee08b', '#d9ef8b', '#91cf60']
 }
 
-LEYENDAS = {
-    'ESTADO': {
-        'titulo': 'Estado Forrajero (kg MS/ha)',
-        'rangos': [
-            {'color': '#d73027', 'rango': '0-199', 'label': 'CRÍTICO'},
-            {'color': '#fdae61', 'rango': '200-399', 'label': 'BAJO'},
-            {'color': '#a1dab4', 'rango': '400-599', 'label': 'MEDIO'},
-            {'color': '#1a9641', 'rango': '600-799', 'label': 'BUENO'},
-            {'color': '#006837', 'rango': '800+', 'label': 'ÓPTIMO'}
-        ]
-    },
-    'EVHA': {
-        'titulo': 'Carga Animal (EV/Ha)',
-        'rangos': [
-            {'color': '#d73027', 'rango': '0.0-0.9', 'label': 'MUY BAJA'},
-            {'color': '#fc8d59', 'rango': '1.0-1.9', 'label': 'BAJA'},
-            {'color': '#fee08b', 'rango': '2.0-2.9', 'label': 'MEDIA'},
-            {'color': '#d9ef8b', 'rango': '3.0-3.9', 'label': 'ALTA'},
-            {'color': '#91cf60', 'rango': '4.0-5.0', 'label': 'MUY ALTA'}
-        ]
-    },
-    'DIAS_PERMANENCIA': {
-        'titulo': 'Días Permanencia',
-        'rangos': [
-            {'color': '#ffffcc', 'rango': '0-1', 'label': 'CORTO'},
-            {'color': '#a1dab4', 'rango': '1.1-2', 'label': 'MEDIO'},
-            {'color': '#41b6c4', 'rango': '2.1-3', 'label': 'IDEAL'},
-            {'color': '#2c7fb8', 'rango': '3.1-4', 'label': 'LARGO'},
-            {'color': '#253494', 'rango': '4.1+', 'label': 'MUY LARGO'}
-        ]
-    }
-}
-
-# =================================================================
-# FUNCIONES DEL SISTEMA
-# =================================================================
-
+# Función para calcular superficie
 def calcular_superficie(gdf):
-    """Calcula superficie en hectáreas"""
     try:
         if gdf.crs and gdf.crs.is_geographic:
-            gdf_proj = gdf.to_crs('EPSG:3857')
-            area_m2 = gdf_proj.geometry.area
+            area_m2 = gdf.geometry.area * 10000000000
         else:
             area_m2 = gdf.geometry.area
         return area_m2 / 10000
-    except Exception as e:
-        st.warning(f"Advertencia en cálculo de área: {e}")
+    except:
         return gdf.geometry.area / 10000
 
-def dividir_potrero_voisin(gdf, n_divisiones):
-    """Divide el potrero en sub-lotes según metodología Voisin"""
+# FUNCIÓN PARA DIVIDIR POTRERO
+def dividir_potrero_en_subLotes(gdf, n_zonas):
     if len(gdf) == 0:
         return gdf
     
@@ -191,15 +151,15 @@ def dividir_potrero_voisin(gdf, n_divisiones):
     
     sub_poligonos = []
     
-    n_cols = math.ceil(math.sqrt(n_divisiones))
-    n_rows = math.ceil(n_divisiones / n_cols)
+    n_cols = math.ceil(math.sqrt(n_zonas))
+    n_rows = math.ceil(n_zonas / n_cols)
     
     width = (maxx - minx) / n_cols
     height = (maxy - miny) / n_rows
     
     for i in range(n_rows):
         for j in range(n_cols):
-            if len(sub_poligonos) >= n_divisiones:
+            if len(sub_poligonos) >= n_zonas:
                 break
                 
             cell_minx = minx + (j * width)
@@ -227,13 +187,17 @@ def dividir_potrero_voisin(gdf, n_divisiones):
     else:
         return gdf
 
-def calcular_indices_satelitales_simulados(gdf, tipo_pastura):
-    """Simula cálculo de índices satelitales"""
+# METODOLOGÍA GEE MEJORADA CON DETECCIÓN DE SUELO/ROCA
+def calcular_indices_forrajeros_gee(gdf, tipo_pastura):
+    """
+    Implementa metodología GEE mejorada con detección de suelo desnudo y roca
+    """
     
     n_poligonos = len(gdf)
     resultados = []
     params = PARAMETROS_FORRAJEROS[tipo_pastura]
     
+    # Obtener centroides para gradiente espacial
     gdf_centroids = gdf.copy()
     gdf_centroids['centroid'] = gdf_centroids.geometry.centroid
     gdf_centroids['x'] = gdf_centroids.centroid.x
@@ -246,483 +210,349 @@ def calcular_indices_satelitales_simulados(gdf, tipo_pastura):
     y_min, y_max = min(y_coords), max(y_coords)
     
     for idx, row in gdf_centroids.iterrows():
+        # Normalizar posición para simular variación espacial
         x_norm = (row['x'] - x_min) / (x_max - x_min) if x_max != x_min else 0.5
         y_norm = (row['y'] - y_min) / (y_max - y_min) if y_max != y_min else 0.5
         
         patron_espacial = (x_norm * 0.6 + y_norm * 0.4)
         
-        # NDVI
-        ndvi_base = 0.5 + (patron_espacial * 0.4)
-        ndvi = ndvi_base + np.random.normal(0, 0.08)
-        ndvi = max(0.1, min(0.9, ndvi))
+        # 1. SIMULAR BANDAS SENTINEL-2 CON VARIABILIDAD REALISTA
+        blue = 0.12 + (patron_espacial * 0.15) + np.random.normal(0, 0.02)
+        green = 0.15 + (patron_espacial * 0.2) + np.random.normal(0, 0.03)
+        red = 0.18 + (patron_espacial * 0.25) + np.random.normal(0, 0.04)
+        nir = 0.35 + (patron_espacial * 0.4) + np.random.normal(0, 0.08)
+        swir1 = 0.25 + (patron_espacial * 0.3) + np.random.normal(0, 0.06)
+        swir2 = 0.20 + (patron_espacial * 0.25) + np.random.normal(0, 0.05)
         
-        # EVI
-        evi_base = 0.4 + (patron_espacial * 0.3)
-        evi = evi_base + np.random.normal(0, 0.06)
-        evi = max(0.1, min(0.8, evi))
+        # 2. CÁLCULO DE ÍNDICES VEGETACIONALES
+        ndvi = (nir - red) / (nir + red) if (nir + red) > 0 else 0
+        ndvi = max(-0.2, min(0.9, ndvi))
         
-        # SAVI
-        savi_base = 0.45 + (patron_espacial * 0.35)
-        savi = savi_base + np.random.normal(0, 0.07)
-        savi = max(0.15, min(0.85, savi))
+        evi = 2.5 * (nir - red) / (nir + 6 * red - 7.5 * blue + 1) if (nir + 6 * red - 7.5 * blue + 1) > 0 else 0
+        evi = max(-0.2, min(0.8, evi))
         
-        # Biomasa
-        biomasa_ndvi = (ndvi * params['FACTOR_BIOMASA_NDVI'] + params['OFFSET_BIOMASA'])
-        biomasa_evi = (evi * params['FACTOR_BIOMASA_EVI'] + params['OFFSET_BIOMASA'])
-        biomasa_savi = (savi * params['FACTOR_BIOMASA_SAVI'] + params['OFFSET_BIOMASA'])
+        savi = 1.5 * (nir - red) / (nir + red + 0.5) if (nir + red + 0.5) > 0 else 0
+        savi = max(-0.2, min(0.8, savi))
         
-        biomasa_promedio = (biomasa_ndvi * 0.4 + biomasa_evi * 0.35 + biomasa_savi * 0.25)
-        biomasa_promedio = max(100, min(6000, biomasa_promedio))
+        ndwi = (nir - swir1) / (nir + swir1) if (nir + swir1) > 0 else 0
+        ndwi = max(-0.5, min(0.5, ndwi))
         
-        biomasa_disponible = (biomasa_promedio * 
-                             PARAMETROS_VOISIN['EFICIENCIA_COSECHA'] * 
-                             (1 - PARAMETROS_VOISIN['PERDIDAS']))
-        biomasa_disponible = max(50, min(1200, biomasa_disponible))
+        # 3. ÍNDICES PARA DETECTAR SUELO DESNUDO/ROCA
+        bsi = ((swir1 + red) - (nir + blue)) / ((swir1 + red) + (nir + blue)) if ((swir1 + red) + (nir + blue)) > 0 else 0
+        ndbi = (swir1 - nir) / (swir1 + nir) if (swir1 + nir) > 0 else 0
+        ndsi = (green - swir1) / (green + swir1) if (green + swir1) > 0 else 0
+        
+        # 4. DETECCIÓN DE ÁREAS SIN VEGETACIÓN
+        prob_suelo_desnudo = max(0, min(1, 
+            (bsi - 0.1) * 2 + (ndbi - 0.05) * 3 + (ndsi - 0.1) * 1.5 + (1 - ndvi) * 0.5
+        ))
+        
+        cobertura_vegetal = max(0, min(1, 
+            (ndvi * 0.4 + evi * 0.3 + savi * 0.3) * 2.5 - prob_suelo_desnudo * 0.8
+        ))
+        
+        # 5. CÁLCULO DE BIOMASA CON FILTRO DE COBERTURA
+        if cobertura_vegetal < params['FACTOR_COBERTURA']:
+            biomasa_ms_ha = params['MS_POR_HA_OPTIMO'] * 0.1 * cobertura_vegetal
+            crecimiento_diario = params['CRECIMIENTO_DIARIO'] * 0.1
+            calidad_forrajera = 0.1
+        else:
+            biomasa_ndvi = (ndvi * params['FACTOR_BIOMASA_NDVI'] + params['OFFSET_BIOMASA'])
+            biomasa_evi = (evi * params['FACTOR_BIOMASA_EVI'] + params['OFFSET_BIOMASA'])
+            biomasa_savi = (savi * params['FACTOR_BIOMASA_SAVI'] + params['OFFSET_BIOMASA'])
+            
+            biomasa_ms_ha = (biomasa_ndvi * 0.4 + biomasa_evi * 0.35 + biomasa_savi * 0.25)
+            biomasa_ms_ha = max(0, min(6000, biomasa_ms_ha))
+            
+            if ndvi < params['UMBRAL_NDVI']:
+                biomasa_ms_ha = biomasa_ms_ha * 0.3
+            
+            crecimiento_diario = (biomasa_ms_ha / params['MS_POR_HA_OPTIMO']) * params['CRECIMIENTO_DIARIO']
+            crecimiento_diario = max(5, min(150, crecimiento_diario))
+            
+            calidad_forrajera = (ndwi + 1) / 2
+            calidad_forrajera = max(0.3, min(0.9, calidad_forrajera))
+        
+        # 6. BIOMASA DISPONIBLE (considerando cobertura)
+        eficiencia_cosecha = 0.25
+        perdidas = 0.30
+        biomasa_disponible = biomasa_ms_ha * calidad_forrajera * eficiencia_cosecha * (1 - perdidas) * cobertura_vegetal
+        biomasa_disponible = max(0, min(1200, biomasa_disponible))
+        
+        # 7. CLASIFICACIÓN DE TIPO DE SUPERFICIE
+        if prob_suelo_desnudo > 0.7:
+            tipo_superficie = "SUELO_DESNUDO"
+        elif prob_suelo_desnudo > 0.5:
+            tipo_superficie = "SUELO_PARCIAL"
+        elif cobertura_vegetal < 0.3:
+            tipo_superficie = "VEGETACION_ESCASA"
+        elif cobertura_vegetal < 0.6:
+            tipo_superficie = "VEGETACION_MODERADA"
+        else:
+            tipo_superficie = "VEGETACION_DENSA"
         
         resultados.append({
             'ndvi': round(ndvi, 3),
             'evi': round(evi, 3),
             'savi': round(savi, 3),
-            'biomasa_total_kg_ms_ha': round(biomasa_promedio, 1),
-            'biomasa_disponible_kg_ms_ha': round(biomasa_disponible, 1)
+            'ndwi': round(ndwi, 3),
+            'bsi': round(bsi, 3),
+            'ndbi': round(ndbi, 3),
+            'cobertura_vegetal': round(cobertura_vegetal, 3),
+            'prob_suelo_desnudo': round(prob_suelo_desnudo, 3),
+            'tipo_superficie': tipo_superficie,
+            'biomasa_ms_ha': round(biomasa_ms_ha, 1),
+            'biomasa_disponible_kg_ms_ha': round(biomasa_disponible, 1),
+            'crecimiento_diario': round(crecimiento_diario, 1),
+            'factor_calidad': round(calidad_forrajera, 3)
         })
     
     return resultados
 
-def calcular_ev_ha(biomasa_disponible, area_ha, tipo_pastura):
-    """Calcula Equivalentes Vaca por hectárea"""
-    params_pastura = PARAMETROS_FORRAJEROS[tipo_pastura]
-    params_voisin = PARAMETROS_VOISIN
+# CÁLCULO DE MÉTRICAS GANADERAS - ACTUALIZADO
+def calcular_metricas_ganaderas(gdf_analizado, tipo_pastura, peso_promedio, carga_animal):
+    """
+    Calcula equivalentes vaca y días de permanencia usando metodología GEE
+    """
+    params = PARAMETROS_FORRAJEROS[tipo_pastura]
+    metricas = []
     
-    biomasa_total = biomasa_disponible * area_ha
-    ev_ha = (biomasa_total * 0.001) / params_pastura['CONSUMO_VACA_DIA']
-    ev_ha = ev_ha / params_voisin['PERIODO_DESCANSO']
+    for idx, row in gdf_analizado.iterrows():
+        biomasa_disponible = row['biomasa_disponible_kg_ms_ha']
+        area_ha = row['area_ha']
+        crecimiento_diario = row['crecimiento_diario']
+        
+        # 1. CONSUMO INDIVIDUAL (kg MS/animal/día) - Método GEE
+        consumo_individual_kg = peso_promedio * params['CONSUMO_PORCENTAJE_PESO']
+        
+        # 2. EQUIVALENTES VACA (EV) - Fórmula GEE corregida
+        biomasa_total_disponible = biomasa_disponible * area_ha
+        
+        # EV = Biomasa (ton) / Consumo diario = EV por día
+        ev_por_dia = biomasa_total_disponible * 0.001 / consumo_individual_kg
+        
+        # EV sostenibles durante período de descanso
+        ev_soportable = ev_por_dia / params['TASA_UTILIZACION_RECOMENDADA']
+        
+        # 3. DÍAS DE PERMANENCIA - Fórmula GEE
+        if carga_animal > 0:
+            consumo_total_diario = carga_animal * consumo_individual_kg
+            
+            if consumo_total_diario > 0:
+                dias_permanencia = biomasa_total_disponible / consumo_total_diario
+                
+                if dias_permanencia > 0:
+                    crecimiento_total = crecimiento_diario * area_ha * dias_permanencia * 0.3
+                    dias_ajustados = (biomasa_total_disponible + crecimiento_total) / consumo_total_diario
+                    dias_permanencia = min(dias_ajustados, 5)
+            else:
+                dias_permanencia = 0
+        else:
+            dias_permanencia = 0
+        
+        # 4. TASA DE UTILIZACIÓN
+        if carga_animal > 0 and biomasa_total_disponible > 0:
+            consumo_potencial_diario = carga_animal * consumo_individual_kg
+            biomasa_por_dia = biomasa_total_disponible / params['TASA_UTILIZACION_RECOMENDADA']
+            tasa_utilizacion = min(1.0, consumo_potencial_diario / biomasa_por_dia)
+        else:
+            tasa_utilizacion = 0
+        
+        # 5. ESTADO FORRAJERO (como en GEE)
+        if biomasa_disponible >= 800:
+            estado_forrajero = 4  # ÓPTIMO
+        elif biomasa_disponible >= 600:
+            estado_forrajero = 3  # BUENO
+        elif biomasa_disponible >= 400:
+            estado_forrajero = 2  # MEDIO
+        elif biomasa_disponible >= 200:
+            estado_forrajero = 1  # BAJO
+        else:
+            estado_forrajero = 0  # CRÍTICO
+        
+        metricas.append({
+            'ev_soportable': round(ev_soportable, 1),
+            'dias_permanencia': max(0, round(dias_permanencia, 1)),
+            'tasa_utilizacion': round(tasa_utilizacion, 3),
+            'biomasa_total_kg': round(biomasa_total_disponible, 1),
+            'consumo_individual_kg': round(consumo_individual_kg, 1),
+            'estado_forrajero': estado_forrajero,
+            'ev_ha': round(ev_soportable / area_ha, 2) if area_ha > 0 else 0
+        })
     
-    return max(0, min(5, ev_ha))
+    return metricas
 
-def calcular_dias_permanencia(biomasa_disponible, area_ha, tipo_pastura):
-    """Calcula días de permanencia por parcela"""
-    params_pastura = PARAMETROS_FORRAJEROS[tipo_pastura]
-    params_voisin = PARAMETROS_VOISIN
-    
-    biomasa_total = biomasa_disponible * area_ha
-    dias = (biomasa_total * 0.001) / (params_pastura['CONSUMO_VACA_DIA'] / 1000)
-    
-    return max(0, min(params_voisin['DIAS_MAXIMO_PASTOREO'], dias))
-
-def clasificar_estado_forrajero(biomasa_disponible):
-    """Clasifica el estado forrajero según rangos GEE"""
-    if biomasa_disponible >= 800:
-        return 4, "ÓPTIMO"
-    elif biomasa_disponible >= 600:
-        return 3, "BUENO"
-    elif biomasa_disponible >= 400:
-        return 2, "MEDIO"
-    elif biomasa_disponible >= 200:
-        return 1, "BAJO"
-    else:
-        return 0, "CRÍTICO"
-
-# =================================================================
-# FUNCIONES DE VISUALIZACIÓN MEJORADAS
-# =================================================================
-
-def crear_mapa_voisin(gdf, tipo_analisis, tipo_pastura):
-    """Crea mapa con estilo GEE/Voisin - VERSIÓN MEJORADA"""
+# FUNCIÓN PARA CREAR MAPA FORRAJERO
+def crear_mapa_forrajero_gee(gdf, tipo_analisis, tipo_pastura):
+    """Crea mapa con métricas forrajeras usando metodología GEE"""
     try:
-        # ✅ SOLUCIÓN: Limpiar cache de matplotlib antes de crear figura
-        clear_matplotlib_cache()
+        fig, ax = plt.subplots(1, 1, figsize=(14, 10))
         
-        fig, ax = plt.subplots(1, 1, figsize=(12, 10))
-        
-        # Seleccionar paleta y parámetros
-        if tipo_analisis == "BIOMASA":
-            cmap = LinearSegmentedColormap.from_list('biomasa_voisin', PALETAS_GEE['ESTADO'])
+        if tipo_analisis == "PRODUCTIVIDAD":
+            cmap = LinearSegmentedColormap.from_list('productividad_gee', PALETAS_GEE['PRODUCTIVIDAD'])
             vmin, vmax = 0, 1200
             columna = 'biomasa_disponible_kg_ms_ha'
-            titulo = 'Biomasa Disponible (kg MS/ha)'
-        elif tipo_analisis == "EV_HA":
-            cmap = LinearSegmentedColormap.from_list('evha_voisin', PALETAS_GEE['EVHA'])
+            titulo_sufijo = 'Biomasa Disponible (kg MS/ha)'
+        elif tipo_analisis == "DISPONIBILIDAD":
+            cmap = LinearSegmentedColormap.from_list('disponibilidad_gee', PALETAS_GEE['DISPONIBILIDAD'])
             vmin, vmax = 0, 5
             columna = 'ev_ha'
-            titulo = 'Carga Animal (EV/Ha)'
+            titulo_sufijo = 'Carga Animal (EV/Ha)'
         else:  # DIAS_PERMANENCIA
-            cmap = LinearSegmentedColormap.from_list('dias_voisin', PALETAS_GEE['DIAS_PERMANENCIA'])
+            cmap = LinearSegmentedColormap.from_list('dias_gee', PALETAS_GEE['DIAS_PERMANENCIA'])
             vmin, vmax = 0, 5
             columna = 'dias_permanencia'
-            titulo = 'Días de Permanencia'
+            titulo_sufijo = 'Días de Permanencia'
         
-        # Plotear cada polígono
         for idx, row in gdf.iterrows():
             valor = row[columna]
             valor_norm = (valor - vmin) / (vmax - vmin)
             valor_norm = max(0, min(1, valor_norm))
             color = cmap(valor_norm)
             
-            # ✅ SOLUCIÓN: Usar plot directo en lugar de iloc
-            poly = gpd.GeoSeries([row.geometry])
-            poly.plot(ax=ax, color=color, edgecolor='black', linewidth=2, alpha=0.8)
+            gdf.iloc[[idx]].plot(ax=ax, color=color, edgecolor='black', linewidth=1.5)
             
-            # Etiqueta con valor
             centroid = row.geometry.centroid
-            ax.annotate(f"S{row['id_subLote']}\n{valor:.1f}", 
-                       (centroid.x, centroid.y), 
-                       xytext=(5, 5), 
-                       textcoords="offset points", 
-                       fontsize=9, 
-                       color='black', 
-                       weight='bold',
+            ax.annotate(f"S{row['id_subLote']}\n{valor:.0f}", (centroid.x, centroid.y), 
+                       xytext=(5, 5), textcoords="offset points", 
+                       fontsize=8, color='black', weight='bold',
                        bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.9))
         
-        # Configuración del mapa
-        ax.set_title(f'🌱 SISTEMA VOISIN - {tipo_pastura}\n{tipo_analisis} - {titulo}', 
+        ax.set_title(f'🌱 ANÁLISIS FORRAJERO GEE - {tipo_pastura}\n'
+                    f'{tipo_analisis} - {titulo_sufijo}\n'
+                    f'Metodología Google Earth Engine', 
                     fontsize=16, fontweight='bold', pad=20)
         
         ax.set_xlabel('Longitud')
         ax.set_ylabel('Latitud')
         ax.grid(True, alpha=0.3)
         
-        # Barra de colores
         sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=vmin, vmax=vmax))
         sm.set_array([])
         cbar = plt.colorbar(sm, ax=ax, shrink=0.8)
-        cbar.set_label(titulo, fontsize=12, fontweight='bold')
+        cbar.set_label(titulo_sufijo, fontsize=12, fontweight='bold')
         
         plt.tight_layout()
         
-        # Convertir a imagen
         buf = io.BytesIO()
         plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
         buf.seek(0)
+        plt.close()
         
-        # ✅ SOLUCIÓN: Cerrar figura explícitamente
-        plt.close(fig)
-        
-        return buf, titulo
+        return buf, titulo_sufijo
         
     except Exception as e:
-        st.error(f"❌ Error creando mapa: {str(e)}")
-        # ✅ SOLUCIÓN: Asegurar que matplotlib se limpie incluso en error
-        plt.close('all')
+        st.error(f"❌ Error creando mapa forrajero: {str(e)}")
         return None, None
 
-def crear_leyenda_interactiva(tipo_leyenda):
-    """Crea leyenda interactiva estilo GEE"""
-    leyenda = LEYENDAS[tipo_leyenda]
-    
-    with st.expander(f"🎨 {leyenda['titulo']}", expanded=True):
-        for rango in leyenda['rangos']:
-            col1, col2 = st.columns([1, 4])
-            with col1:
-                st.markdown(
-                    f"<div style='background-color: {rango['color']}; padding: 10px; border-radius: 5px;'></div>", 
-                    unsafe_allow_html=True
-                )
-            with col2:
-                st.write(f"**{rango['rango']}** - {rango['label']}")
-
-# =================================================================
-# ANÁLISIS PRINCIPAL MEJORADO
-# =================================================================
-
-def analisis_voisin_completo(gdf, tipo_pastura, n_divisiones):
-    """Ejecuta análisis completo con metodología Voisin - VERSIÓN MEJORADA"""
-    
+# NUEVA FUNCIÓN PARA MAPA DE COBERTURA
+def crear_mapa_cobertura(gdf, tipo_pastura):
+    """Crea mapa de cobertura vegetal y tipos de superficie"""
     try:
-        # ✅ SOLUCIÓN: Incrementar contador de ejecuciones
-        st.session_state.execution_count += 1
+        fig, ax = plt.subplots(1, 1, figsize=(14, 10))
         
-        st.header(f"🌱 ANÁLISIS VOISIN - {tipo_pastura}")
+        colores_superficie = {
+            'SUELO_DESNUDO': '#d73027',
+            'SUELO_PARCIAL': '#fdae61', 
+            'VEGETACION_ESCASA': '#fee08b',
+            'VEGETACION_MODERADA': '#a6d96a',
+            'VEGETACION_DENSA': '#1a9850'
+        }
         
-        # 1. DIVIDIR POTRERO
-        st.subheader("📐 DIVIDIENDO POTRERO EN SUB-LOTES VOISIN")
-        with st.spinner("Aplicando metodología Voisin..."):
-            gdf_dividido = dividir_potrero_voisin(gdf, n_divisiones)
-        
-        st.success(f"✅ Potrero dividido en {len(gdf_dividido)} sub-lotes")
-        
-        # Calcular áreas
-        areas_ha = calcular_superficie(gdf_dividido)
-        area_total = areas_ha.sum()
-        
-        # 2. CALCULAR ÍNDICES SATELITALES
-        st.subheader("🛰️ CALCULANDO ÍNDICES SATELITALES")
-        with st.spinner("Simulando algoritmos GEE..."):
-            indices_satelitales = calcular_indices_satelitales_simulados(gdf_dividido, tipo_pastura)
-        
-        # Crear dataframe con resultados
-        gdf_analizado = gdf_dividido.copy()
-        gdf_analizado['area_ha'] = areas_ha
-        
-        # Añadir índices satelitales
-        for idx, indice in enumerate(indices_satelitales):
-            for key, value in indice.items():
-                gdf_analizado.loc[gdf_analizado.index[idx], key] = value
-        
-        # 3. CALCULAR MÉTRICAS VOISIN
-        st.subheader("🐄 CALCULANDO MÉTRICAS REGENERATIVAS")
-        
-        metricas_voisin = []
-        for idx, row in gdf_analizado.iterrows():
-            ev_ha = calcular_ev_ha(
-                row['biomasa_disponible_kg_ms_ha'], 
-                row['area_ha'], 
-                tipo_pastura
-            )
+        for idx, row in gdf.iterrows():
+            tipo_superficie = row['tipo_superficie']
+            color = colores_superficie.get(tipo_superficie, '#cccccc')
             
-            dias_permanencia = calcular_dias_permanencia(
-                row['biomasa_disponible_kg_ms_ha'],
-                row['area_ha'],
-                tipo_pastura
-            )
+            gdf.iloc[[idx]].plot(ax=ax, color=color, edgecolor='black', linewidth=1.5)
             
-            estado_valor, estado_label = clasificar_estado_forrajero(
-                row['biomasa_disponible_kg_ms_ha']
-            )
-            
-            metricas_voisin.append({
-                'ev_ha': round(ev_ha, 2),
-                'dias_permanencia': round(dias_permanencia, 1),
-                'estado_valor': estado_valor,
-                'estado_label': estado_label,
-                'biomasa_total_kg': round(row['biomasa_disponible_kg_ms_ha'] * row['area_ha'], 1)
-            })
+            centroid = row.geometry.centroid
+            ax.annotate(f"S{row['id_subLote']}\n{row['cobertura_vegetal']:.1f}", 
+                       (centroid.x, centroid.y), 
+                       xytext=(5, 5), textcoords="offset points", 
+                       fontsize=8, color='black', weight='bold',
+                       bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.9))
         
-        # Añadir métricas Voisin
-        for idx, metrica in enumerate(metricas_voisin):
-            for key, value in metrica.items():
-                gdf_analizado.loc[gdf_analizado.index[idx], key] = value
+        ax.set_title(f'🌱 MAPA DE COBERTURA VEGETAL - {tipo_pastura}\n'
+                    f'Tipos de Superficie y Cobertura Vegetal\n'
+                    f'Metodología Google Earth Engine', 
+                    fontsize=16, fontweight='bold', pad=20)
         
-        # 4. MOSTRAR RESULTADOS PRINCIPALES
-        st.subheader("📊 RESULTADOS DEL ANÁLISIS VOISIN")
+        ax.set_xlabel('Longitud')
+        ax.set_ylabel('Latitud')
+        ax.grid(True, alpha=0.3)
         
-        # Estadísticas principales
-        col1, col2, col3, col4 = st.columns(4)
+        leyenda_elementos = []
+        for tipo, color in colores_superficie.items():
+            leyenda_elementos.append(mpatches.Patch(color=color, label=tipo))
         
-        with col1:
-            biomasa_prom = gdf_analizado['biomasa_disponible_kg_ms_ha'].mean()
-            st.metric("Biomasa Disponible", f"{biomasa_prom:.0f} kg MS/ha")
+        ax.legend(handles=leyenda_elementos, loc='upper right', fontsize=10)
         
-        with col2:
-            ev_prom = gdf_analizado['ev_ha'].mean()
-            st.metric("Carga Animal Promedio", f"{ev_prom:.1f} EV/Ha")
+        plt.tight_layout()
         
-        with col3:
-            dias_prom = gdf_analizado['dias_permanencia'].mean()
-            st.metric("Permanencia Promedio", f"{dias_prom:.1f} días")
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+        buf.seek(0)
+        plt.close()
         
-        with col4:
-            capacidad_total = gdf_analizado['ev_ha'].sum() * area_total
-            st.metric("Capacidad Total", f"{capacidad_total:.0f} EV")
-        
-        # 5. MAPAS INTERACTIVOS
-        st.subheader("🗺️ MAPAS DE ANÁLISIS VOISIN")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        # ✅ SOLUCIÓN: Crear mapas de forma secuencial para evitar conflictos
-        with col1:
-            st.write("**🌿 BIOMASA DISPONIBLE**")
-            with st.spinner("Generando mapa de biomasa..."):
-                mapa_biomasa, _ = crear_mapa_voisin(gdf_analizado, "BIOMASA", tipo_pastura)
-            if mapa_biomasa:
-                st.image(mapa_biomasa, use_container_width=True)
-                st.download_button(
-                    "📥 Descargar Mapa Biomasa",
-                    mapa_biomasa.getvalue(),
-                    f"voisin_biomasa_{tipo_pastura}_{datetime.now().strftime('%Y%m%d_%H%M')}.png",
-                    "image/png",
-                    key="download_biomasa"
-                )
-        
-        with col2:
-            st.write("**🐄 CARGA ANIMAL**")
-            with st.spinner("Generando mapa de EV/Ha..."):
-                mapa_ev, _ = crear_mapa_voisin(gdf_analizado, "EV_HA", tipo_pastura)
-            if mapa_ev:
-                st.image(mapa_ev, use_container_width=True)
-                st.download_button(
-                    "📥 Descargar Mapa EV/Ha",
-                    mapa_ev.getvalue(),
-                    f"voisin_evha_{tipo_pastura}_{datetime.now().strftime('%Y%m%d_%H%M')}.png",
-                    "image/png",
-                    key="download_evha"
-                )
-        
-        with col3:
-            st.write("**⏰ DÍAS PERMANENCIA**")
-            with st.spinner("Generando mapa de permanencia..."):
-                mapa_dias, _ = crear_mapa_voisin(gdf_analizado, "DIAS_PERMANENCIA", tipo_pastura)
-            if mapa_dias:
-                st.image(mapa_dias, use_container_width=True)
-                st.download_button(
-                    "📥 Descargar Mapa Permanencia",
-                    mapa_dias.getvalue(),
-                    f"voisin_dias_{tipo_pastura}_{datetime.now().strftime('%Y%m%d_%H%M')}.png",
-                    "image/png",
-                    key="download_dias"
-                )
-        
-        # 6. LEYENDAS INTERACTIVAS
-        st.subheader("🎨 LEYENDAS DE INTERPRETACIÓN")
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            crear_leyenda_interactiva('ESTADO')
-        with col2:
-            crear_leyenda_interactiva('EVHA')
-        with col3:
-            crear_leyenda_interactiva('DIAS_PERMANENCIA')
-        
-        # 7. TABLA DE RESULTADOS DETALLADOS
-        st.subheader("🔬 DATOS DETALLADOS POR SUB-LOTE")
-        
-        columnas_detalle = [
-            'id_subLote', 'area_ha', 'biomasa_disponible_kg_ms_ha', 
-            'ndvi', 'evi', 'savi', 'ev_ha', 'dias_permanencia', 'estado_label'
-        ]
-        
-        tabla_detalle = gdf_analizado[columnas_detalle].copy()
-        tabla_detalle.columns = [
-            'Sub-Lote', 'Área (ha)', 'Biomasa Disp. (kg MS/ha)', 
-            'NDVI', 'EVI', 'SAVI', 'EV/Ha', 'Días Permanencia', 'Estado'
-        ]
-        
-        st.dataframe(tabla_detalle, use_container_width=True)
-        
-        # 8. RECOMENDACIONES VOISIN
-        st.subheader("💡 RECOMENDACIONES REGENERATIVAS")
-        
-        estado_counts = gdf_analizado['estado_label'].value_counts()
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.write("**📈 DISTRIBUCIÓN DE ESTADO:**")
-            for estado, count in estado_counts.items():
-                porcentaje = (count / len(gdf_analizado)) * 100
-                st.write(f"- {estado}: {count} sub-lotes ({porcentaje:.1f}%)")
-        
-        with col2:
-            st.write("**🎯 ESTRATEGIA VOISIN:**")
-            
-            if estado_counts.get('CRÍTICO', 0) > 0:
-                st.error("**🚨 ACCIÓN INMEDIATA REQUERIDA**")
-                st.write("- Reducir carga animal urgentemente")
-                st.write("- Implementar suplementación estratégica")
-                st.write("- Evaluar resiembra con especies adaptadas")
-            
-            elif estado_counts.get('BAJO', 0) > len(gdf_analizado) * 0.3:
-                st.warning("**⚠️ MANEJO PRECAUTORIO**")
-                st.write("- Ajustar rotación a 40-45 días")
-                st.write("- Monitorear crecimiento semanal")
-                st.write("- Considerar fertilización orgánica")
-            
-            else:
-                st.success("**✅ SITUACIÓN ÓPTIMA**")
-                st.write("- Mantener manejo actual")
-                st.write("- Continuar monitoreo mensual")
-                st.write("- Enfoque en mejora continua")
-        
-        # 9. BOTONES DE EXPORTACIÓN
-        st.subheader("💾 EXPORTAR RESULTADOS")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            csv = gdf_analizado.to_csv(index=False)
-            st.download_button(
-                "📊 Descargar CSV Completo",
-                csv,
-                f"voisin_datos_completos_{tipo_pastura}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                "text/csv",
-                key="download_csv"
-            )
-        
-        with col2:
-            resumen = crear_resumen_ejecutivo(gdf_analizado, tipo_pastura, area_total)
-            st.download_button(
-                "📋 Descargar Resumen",
-                resumen,
-                f"voisin_resumen_{tipo_pastura}_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
-                "text/plain",
-                key="download_resumen"
-            )
-        
-        with col3:
-            def crear_pack_mapas():
-                files = []
-                if mapa_biomasa:
-                    files.append(("biomasa.png", mapa_biomasa.getvalue()))
-                if mapa_ev:
-                    files.append(("ev_ha.png", mapa_ev.getvalue()))
-                if mapa_dias:
-                    files.append(("dias_permanencia.png", mapa_dias.getvalue()))
-                return create_zip_file(files)
-            
-            st.download_button(
-                "🗂️ Descargar Pack Mapas",
-                crear_pack_mapas(),
-                f"voisin_mapas_{tipo_pastura}_{datetime.now().strftime('%Y%m%d_%H%M')}.zip",
-                "application/zip",
-                key="download_zip"
-            )
-        
-        # ✅ SOLUCIÓN: Marcar análisis como completado
-        st.session_state.analysis_done = True
-        
-        return True
+        return buf
         
     except Exception as e:
-        st.error(f"❌ Error en análisis Voisin: {str(e)}")
-        import traceback
-        st.error(f"Detalle técnico: {traceback.format_exc()}")
-        return False
+        st.error(f"❌ Error creando mapa de cobertura: {str(e)}")
+        return None
 
-def crear_resumen_ejecutivo(gdf, tipo_pastura, area_total):
-    """Crea resumen ejecutivo del análisis"""
-    total_ev = gdf['ev_ha'].sum()
-    dias_prom = gdf['dias_permanencia'].mean()
-    biomasa_prom = gdf['biomasa_disponible_kg_ms_ha'].mean()
-    
-    resumen = f"""
-RESUMEN EJECUTIVO - SISTEMA VOISIN
-==================================
-Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M')}
-Tipo de Pastura: {tipo_pastura}
-Área Total: {area_total:.1f} ha
-Sub-Lotes Analizados: {len(gdf)}
+# FUNCIÓN DE VALIDACIÓN PARA VERIFICAR CORRELACIÓN
+def validar_correlacion_datos(gdf_analizado):
+    """
+    Valida la correlación entre variables forrajeras
+    """
+    try:
+        correlaciones = gdf_analizado[['biomasa_disponible_kg_ms_ha', 'ev_ha', 'dias_permanencia', 'area_ha']].corr()
+        
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        
+        axes[0,0].scatter(gdf_analizado['biomasa_disponible_kg_ms_ha'], gdf_analizado['dias_permanencia'], alpha=0.6)
+        axes[0,0].set_xlabel('Biomasa Disponible (kg MS/ha)')
+        axes[0,0].set_ylabel('Días Permanencia')
+        axes[0,0].set_title('Biomasa vs Días Permanencia')
+        
+        axes[0,1].scatter(gdf_analizado['ev_ha'], gdf_analizado['dias_permanencia'], alpha=0.6)
+        axes[0,1].set_xlabel('EV/Ha')
+        axes[0,1].set_ylabel('Días Permanencia')
+        axes[0,1].set_title('EV/Ha vs Días Permanencia')
+        
+        axes[1,0].scatter(gdf_analizado['biomasa_disponible_kg_ms_ha'], gdf_analizado['ev_ha'], alpha=0.6)
+        axes[1,0].set_xlabel('Biomasa Disponible (kg MS/ha)')
+        axes[1,0].set_ylabel('EV/Ha')
+        axes[1,0].set_title('Biomasa vs EV/Ha')
+        
+        im = axes[1,1].imshow(correlaciones.values, cmap='coolwarm', aspect='auto', vmin=-1, vmax=1)
+        axes[1,1].set_xticks(range(len(correlaciones.columns)))
+        axes[1,1].set_yticks(range(len(correlaciones.columns)))
+        axes[1,1].set_xticklabels(correlaciones.columns, rotation=45)
+        axes[1,1].set_yticklabels(correlaciones.columns)
+        axes[1,1].set_title('Matriz de Correlación')
+        
+        for i in range(len(correlaciones.columns)):
+            for j in range(len(correlaciones.columns)):
+                axes[1,1].text(j, i, f'{correlaciones.iloc[i, j]:.2f}', 
+                              ha='center', va='center', color='white' if abs(correlaciones.iloc[i, j]) > 0.5 else 'black')
+        
+        plt.tight_layout()
+        
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+        buf.seek(0)
+        plt.close()
+        
+        return buf, correlaciones
+        
+    except Exception as e:
+        st.error(f"Error en validación de correlación: {str(e)}")
+        return None, None
 
-MÉTRICAS PRINCIPALES
--------------------
-• Capacidad Total: {total_ev:.1f} EV
-• Permanencia Promedio: {dias_prom:.1f} días
-• Biomasa Disponible: {biomasa_prom:.0f} kg MS/ha
-
-PARÁMETROS VOISIN APLICADOS
---------------------------
-• Período Descanso: {PARAMETROS_VOISIN['PERIODO_DESCANSO']} días
-• Días Máx. Pastoreo: {PARAMETROS_VOISIN['DIAS_MAXIMO_PASTOREO']} días
-• Consumo Diario: {PARAMETROS_VOISIN['CONSUMO_DIARIO_VACA']} kg MS/vaca
-
-RECOMENDACIONES
---------------
-"""
-    
-    if dias_prom < 1:
-        resumen += "• Aumentar período de descanso a 45 días\n"
-    if total_ev < 1:
-        resumen += "• Considerar aumentar carga animal gradualmente\n"
-    if biomasa_prom < 200:
-        resumen += "• Evaluar resiembra y fertilización orgánica\n"
-    
-    resumen += "• Mantener rotación intensiva según principios Voisin\n"
-    resumen += "• Monitoreo continuo del crecimiento forrajero\n"
-    
-    return resumen
-
+# FUNCIÓN PARA CREAR ARCHIVO ZIP
 def create_zip_file(files):
-    """Crea archivo ZIP con múltiples archivos"""
+    """Crea un archivo ZIP con múltiples archivos"""
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
         for file_name, file_data in files:
@@ -730,83 +560,409 @@ def create_zip_file(files):
     zip_buffer.seek(0)
     return zip_buffer.getvalue()
 
-# =================================================================
-# SIDEBAR MEJORADO
-# =================================================================
+# FUNCIÓN PARA CREAR RESUMEN EJECUTIVO
+def crear_resumen_ejecutivo(gdf_analizado, tipo_pastura, area_total):
+    """Crea un resumen ejecutivo en texto"""
+    total_ev = gdf_analizado['ev_soportable'].sum()
+    dias_prom = gdf_analizado['dias_permanencia'].mean()
+    biomasa_prom = gdf_analizado['biomasa_disponible_kg_ms_ha'].mean()
+    biomasa_total = gdf_analizado['biomasa_total_kg'].sum()
+    
+    # Calcular áreas por tipo de superficie
+    area_por_tipo = gdf_analizado.groupby('tipo_superficie')['area_ha'].sum()
+    area_vegetacion = area_por_tipo.get('VEGETACION_DENSA', 0) + area_por_tipo.get('VEGETACION_MODERADA', 0) + area_por_tipo.get('VEGETACION_ESCASA', 0)
+    area_suelo = area_por_tipo.get('SUELO_DESNUDO', 0) + area_por_tipo.get('SUELO_PARCIAL', 0)
+    
+    resumen = f"""
+RESUMEN EJECUTIVO - ANÁLISIS FORRAJERO
+=====================================
+Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M')}
+Tipo de Pastura: {tipo_pastura}
+Área Total: {area_total:.1f} ha
+Sub-Lotes Analizados: {len(gdf_analizado)}
 
-with st.sidebar:
-    st.header("⚙️ CONFIGURACIÓN VOISIN")
-    
-    # ✅ SOLUCIÓN: Botón para resetear la aplicación
-    if st.button("🔄 Reiniciar Aplicación", use_container_width=True):
-        reset_analysis()
-    
-    tipo_pastura = st.selectbox(
-        "Tipo de Pastura:", 
-        ["ALFALFA", "RAYGRASS", "FESTUCA", "AGROPIRRO", "MEZCLA_NATURAL"],
-        key="tipo_pastura_select"
-    )
-    
-    st.subheader("📊 PARÁMETROS GANADEROS")
-    
-    peso_promedio = st.slider("Peso promedio animal (kg):", 300, 600, 450, key="peso_slider")
-    carga_animal = st.slider("Carga animal (cabezas):", 10, 500, 100, key="carga_slider")
-    
-    st.subheader("🎯 PARÁMETROS VOISIN")
-    consumo_diario = st.slider("Consumo diario (kg MS/vaca):", 8, 15, 12, key="consumo_slider")
-    periodo_descanso = st.slider("Período descanso (días):", 20, 60, 35, key="descanso_slider")
-    dias_max_pastoreo = st.slider("Días máx. pastoreo/lote:", 1, 7, 3, key="dias_slider")
-    
-    st.subheader("🗺️ DIVISIÓN DE POTRERO")
-    n_divisiones = st.slider("Número de sub-lotes:", min_value=4, max_value=20, value=8, key="divisiones_slider")
-    
-    st.subheader("📤 SUBIR POTRERO")
-    uploaded_zip = st.file_uploader("Subir ZIP con shapefile", type=['zip'], key="file_uploader")
-    
-    # Actualizar parámetros
-    PARAMETROS_VOISIN['CONSUMO_DIARIO_VACA'] = consumo_diario
-    PARAMETROS_VOISIN['PERIODO_DESCANSO'] = periodo_descanso
-    PARAMETROS_VOISIN['DIAS_MAXIMO_PASTOREO'] = dias_max_pastoreo
-    PARAMETROS_VOISIN['PESO_PROMEDIO_VACA'] = peso_promedio
+MÉTRICAS PRINCIPALES
+-------------------
+• Capacidad Total: {total_ev:.0f} Equivalentes Vaca
+• Permanencia Promedio: {dias_prom:.0f} días
+• Biomasa Disponible Promedio: {biomasa_prom:.0f} kg MS/ha
+• Biomasa Total: {biomasa_total/1000:.1f} ton MS
 
-# =================================================================
-# INTERFAZ PRINCIPAL MEJORADA
-# =================================================================
+ANÁLISIS DE COBERTURA
+-------------------
+• Área con Vegetación: {area_vegetacion:.1f} ha ({(area_vegetacion/area_total*100):.1f}%)
+• Área sin Vegetación: {area_suelo:.1f} ha ({(area_suelo/area_total*100):.1f}%)
+• Cobertura Vegetal Promedio: {(gdf_analizado['cobertura_vegetal'].mean()*100):.1f}%
 
-# Mostrar información inicial si no hay archivo cargado
-if not uploaded_zip:
-    st.info("📁 Sube el ZIP de tu potrero para comenzar el análisis Voisin")
+DISTRIBUCIÓN POR CATEGORÍA DE MANEJO
+-----------------------------------
+"""
     
-    with st.expander("ℹ️ INFORMACIÓN DEL SISTEMA VOISIN"):
-        st.markdown("""
-        **🌱 SISTEMA DE GANADERÍA REGENERATIVA VOISIN**
+    categorias = gdf_analizado['categoria_manejo'].value_counts()
+    for cat, count in categorias.items():
+        area_cat = gdf_analizado[gdf_analizado['categoria_manejo'] == cat]['area_ha'].sum()
+        porcentaje = (area_cat/area_total*100)
+        resumen += f"• {cat}: {count} sub-lotes, {area_cat:.1f} ha ({porcentaje:.1f}%)\n"
+    
+    resumen += f"""
+RECOMENDACIONES GENERALES
+-----------------------
+"""
+    
+    if dias_prom < 15:
+        resumen += "• ROTACIÓN URGENTE: Considerar reducir carga animal o suplementar\n"
+    elif dias_prom < 30:
+        resumen += "• MANEJO VIGILANTE: Monitorear crecimiento y planificar rotaciones\n"
+    else:
+        resumen += "• SITUACIÓN ÓPTIMA: Mantener manejo actual y monitorear periódicamente\n"
+    
+    if area_suelo > area_total * 0.3:
+        resumen += "• ALTA PROPORCIÓN DE SUELO: Considerar mejoras de suelo y resiembra\n"
+    
+    return resumen
+
+# FUNCIÓN PRINCIPAL DE ANÁLISIS FORRAJERO - MEJORADA
+def analisis_forrajero_completo(gdf, tipo_pastura, peso_promedio, carga_animal, n_divisiones):
+    try:
+        st.header(f"🌱 ANÁLISIS FORRAJERO - {tipo_pastura}")
         
-        **🎯 PRINCIPIOS APLICADOS:**
-        - **Rotación Intensiva:** Períodos de descanso optimizados
-        - **Carga Instantánea:** Cálculo preciso de EV/Ha
-        - **Permanencia Controlada:** Máximo 3 días por parcela
-        - **Descanso Prolongado:** 35+ días para recuperación
+        # PASO 1: DIVIDIR POTRERO
+        st.subheader("📐 DIVIDIENDO POTRERO EN SUB-LOTES")
+        with st.spinner("Dividiendo potrero..."):
+            gdf_dividido = dividir_potrero_en_subLotes(gdf, n_divisiones)
         
-        **🛰️ METODOLOGÍA GEE ADAPTADA:**
-        - **NDVI/EVI/SAVI:** Índices de vegetación satelital
-        - **Biomasa Estimada:** Algoritmos científicos probados
-        - **Análisis Espacial:** Variabilidad dentro del potrero
-        - **Recomendaciones Precise:** Basadas en datos reales
-        """)
+        st.success(f"✅ Potrero dividido en {len(gdf_dividido)} sub-lotes")
+        
+        # Calcular áreas
+        areas_ha = calcular_superficie(gdf_dividido)
+        area_total = areas_ha.sum()
+        
+        # PASO 2: CALCULAR ÍNDICES FORRAJEROS GEE MEJORADO
+        st.subheader("🛰️ CALCULANDO ÍNDICES FORRAJEROS GEE")
+        with st.spinner("Ejecutando algoritmos GEE con detección de suelo..."):
+            indices_forrajeros = calcular_indices_forrajeros_gee(gdf_dividido, tipo_pastura)
+        
+        # Crear dataframe con resultados
+        gdf_analizado = gdf_dividido.copy()
+        gdf_analizado['area_ha'] = areas_ha
+        
+        # Añadir índices forrajeros
+        for idx, indice in enumerate(indices_forrajeros):
+            for key, value in indice.items():
+                gdf_analizado.loc[gdf_analizado.index[idx], key] = value
+        
+        # PASO 3: CALCULAR MÉTRICAS GANADERAS
+        st.subheader("🐄 CALCULANDO MÉTRICAS GANADERAS")
+        with st.spinner("Calculando equivalentes vaca y días de permanencia..."):
+            metricas_ganaderas = calcular_metricas_ganaderas(gdf_analizado, tipo_pastura, peso_promedio, carga_animal)
+        
+        # Añadir métricas ganaderas
+        for idx, metrica in enumerate(metricas_ganaderas):
+            for key, value in metrica.items():
+                gdf_analizado.loc[gdf_analizado.index[idx], key] = value
+        
+        # PASO 4: CATEGORIZAR PARA RECOMENDACIONES
+        def categorizar_forrajero(estado_forrajero, dias_permanencia):
+            if estado_forrajero == 0 or dias_permanencia < 1:
+                return "CRÍTICO"
+            elif estado_forrajero == 1 or dias_permanencia < 2:
+                return "ALERTA"
+            elif estado_forrajero == 2 or dias_permanencia < 3:
+                return "ADEQUADO"
+            elif estado_forrajero == 3:
+                return "BUENO"
+            else:
+                return "ÓPTIMO"
+        
+        gdf_analizado['categoria_manejo'] = [
+            categorizar_forrajero(row['estado_forrajero'], row['dias_permanencia']) 
+            for idx, row in gdf_analizado.iterrows()
+        ]
+        
+        # PASO 5: MOSTRAR RESULTADOS
+        st.subheader("📊 RESULTADOS DEL ANÁLISIS FORRAJERO")
+        
+        # Estadísticas principales
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Sub-Lotes Analizados", len(gdf_analizado))
+        with col2:
+            st.metric("Área Total", f"{area_total:.1f} ha")
+        with col3:
+            biomasa_prom = gdf_analizado['biomasa_disponible_kg_ms_ha'].mean()
+            st.metric("Biomasa Disponible Prom", f"{biomasa_prom:.0f} kg MS/ha")
+        with col4:
+            dias_prom = gdf_analizado['dias_permanencia'].mean()
+            st.metric("Permanencia Promedio", f"{dias_prom:.0f} días")
+        
+        # PASO 6: ANÁLISIS DE COBERTURA
+        st.subheader("🌿 ANÁLISIS DE COBERTURA VEGETAL")
+        
+        stats_cobertura = gdf_analizado['tipo_superficie'].value_counts()
+        area_por_tipo = gdf_analizado.groupby('tipo_superficie')['area_ha'].sum()
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            cobertura_prom = gdf_analizado['cobertura_vegetal'].mean()
+            st.metric("Cobertura Vegetal Promedio", f"{cobertura_prom:.1%}")
+        with col2:
+            area_vegetacion = area_por_tipo.get('VEGETACION_DENSA', 0) + area_por_tipo.get('VEGETACION_MODERADA', 0) + area_por_tipo.get('VEGETACION_ESCASA', 0)
+            st.metric("Área con Vegetación", f"{area_vegetacion:.1f} ha")
+        with col3:
+            area_suelo = area_por_tipo.get('SUELO_DESNUDO', 0) + area_por_tipo.get('SUELO_PARCIAL', 0)
+            st.metric("Área sin Vegetación", f"{area_suelo:.1f} ha")
+        
+        # Mapa de cobertura
+        st.write("**🗺️ MAPA DE COBERTURA VEGETAL**")
+        mapa_cobertura = crear_mapa_cobertura(gdf_analizado, tipo_pastura)
+        if mapa_cobertura:
+            st.image(mapa_cobertura, use_container_width=True)
+            
+            st.download_button(
+                "📥 Descargar Mapa de Cobertura",
+                mapa_cobertura.getvalue(),
+                f"mapa_cobertura_{tipo_pastura}_{datetime.now().strftime('%Y%m%d_%H%M')}.png",
+                "image/png",
+                key="descarga_cobertura"
+            )
+        
+        # TABLA DE TIPOS DE SUPERFICIE
+        st.write("**📊 DISTRIBUCIÓN DE TIPOS DE SUPERFICIE**")
+        resumen_cobertura = pd.DataFrame({
+            'Tipo de Superficie': stats_cobertura.index,
+            'Número de Sub-Lotes': stats_cobertura.values,
+            'Área Total (ha)': [area_por_tipo.get(tipo, 0) for tipo in stats_cobertura.index],
+            'Porcentaje del Área': [f"{(area_por_tipo.get(tipo, 0) / area_total * 100):.1f}%" 
+                                  for tipo in stats_cobertura.index]
+        })
+        st.dataframe(resumen_cobertura, use_container_width=True)
+        
+        # PASO 7: MAPAS FORRAJEROS
+        st.subheader("🗺️ MAPAS FORRAJEROS GEE")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.write("**📈 PRODUCTIVIDAD**")
+            mapa_biomasa, titulo_biomasa = crear_mapa_forrajero_gee(gdf_analizado, "PRODUCTIVIDAD", tipo_pastura)
+            if mapa_biomasa:
+                st.image(mapa_biomasa, use_container_width=True)
+                st.download_button(
+                    "📥 Descargar Mapa Productividad",
+                    mapa_biomasa.getvalue(),
+                    f"mapa_productividad_{tipo_pastura}_{datetime.now().strftime('%Y%m%d_%H%M')}.png",
+                    "image/png",
+                    key="descarga_biomasa"
+                )
+        
+        with col2:
+            st.write("**🐄 DISPONIBILIDAD**")
+            mapa_ev, titulo_ev = crear_mapa_forrajero_gee(gdf_analizado, "DISPONIBILIDAD", tipo_pastura)
+            if mapa_ev:
+                st.image(mapa_ev, use_container_width=True)
+                st.download_button(
+                    "📥 Descargar Mapa Disponibilidad",
+                    mapa_ev.getvalue(),
+                    f"mapa_disponibilidad_{tipo_pastura}_{datetime.now().strftime('%Y%m%d_%H%M')}.png",
+                    "image/png",
+                    key="descarga_disponibilidad"
+                )
+        
+        with col3:
+            st.write("**📅 PERMANENCIA**")
+            mapa_dias, titulo_dias = crear_mapa_forrajero_gee(gdf_analizado, "DIAS_PERMANENCIA", tipo_pastura)
+            if mapa_dias:
+                st.image(mapa_dias, use_container_width=True)
+                st.download_button(
+                    "📥 Descargar Mapa Permanencia",
+                    mapa_dias.getvalue(),
+                    f"mapa_permanencia_{tipo_pastura}_{datetime.now().strftime('%Y%m%d_%H%M')}.png",
+                    "image/png",
+                    key="descarga_permanencia"
+                )
+        
+        # PASO 8: VALIDACIÓN DE CORRELACIONES
+        st.subheader("🔍 VALIDACIÓN DE CORRELACIONES")
+        
+        with st.spinner("Validando consistencia de datos..."):
+            mapa_validacion, correlaciones = validar_correlacion_datos(gdf_analizado)
+        
+        if mapa_validacion:
+            st.image(mapa_validacion, use_container_width=True)
+            
+            st.write("**📊 Matriz de Correlación:**")
+            st.dataframe(correlaciones.style.background_gradient(cmap='coolwarm', vmin=-1, vmax=1))
+            
+            corr_biomasa_dias = correlaciones.loc['biomasa_disponible_kg_ms_ha', 'dias_permanencia']
+            corr_ev_dias = correlaciones.loc['ev_ha', 'dias_permanencia']
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if corr_biomasa_dias > 0.7:
+                    st.success(f"✅ Alta correlación Biomasa-Días: {corr_biomasa_dias:.3f}")
+                elif corr_biomasa_dias > 0.4:
+                    st.warning(f"⚠️ Correlación moderada Biomasa-Días: {corr_biomasa_dias:.3f}")
+                else:
+                    st.error(f"❌ Baja correlación Biomasa-Días: {corr_biomasa_dias:.3f}")
+            
+            with col2:
+                if corr_ev_dias > 0.7:
+                    st.success(f"✅ Alta correlación EV-Días: {corr_ev_dias:.3f}")
+                elif corr_ev_dias > 0.4:
+                    st.warning(f"⚠️ Correlación moderada EV-Días: {corr_ev_dias:.3f}")
+                else:
+                    st.error(f"❌ Baja correlación EV-Días: {corr_ev_dias:.3f}")
+        
+        # PASO 9: DESCARGAS
+        st.subheader("📦 DESCARGAR RESULTADOS")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if mapa_biomasa and mapa_ev and mapa_dias and mapa_cobertura:
+                st.download_button(
+                    "🗂️ Descargar Pack Completo",
+                    data=create_zip_file([
+                        ("productividad.png", mapa_biomasa.getvalue()),
+                        ("disponibilidad.png", mapa_ev.getvalue()),
+                        ("permanencia.png", mapa_dias.getvalue()),
+                        ("cobertura.png", mapa_cobertura.getvalue())
+                    ]),
+                    file_name=f"mapas_forrajeros_{tipo_pastura}_{datetime.now().strftime('%Y%m%d_%H%M')}.zip",
+                    mime="application/zip",
+                    key="descarga_pack"
+                )
+        
+        with col2:
+            resumen_texto = crear_resumen_ejecutivo(gdf_analizado, tipo_pastura, area_total)
+            st.download_button(
+                "📋 Descargar Resumen Ejecutivo",
+                resumen_texto,
+                f"resumen_ejecutivo_{tipo_pastura}_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
+                "text/plain",
+                key="descarga_resumen"
+            )
+        
+        with col3:
+            csv = gdf_analizado.to_csv(index=False)
+            st.download_button(
+                "📊 Descargar Datos Completos",
+                csv,
+                f"datos_completos_{tipo_pastura}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                "text/csv",
+                key="descarga_datos"
+            )
+        
+        # PASO 10: TABLA DETALLADA
+        st.subheader("🔬 MÉTRICAS DETALLADAS POR SUB-LOTE")
+        
+        columnas_detalle = ['id_subLote', 'area_ha', 'biomasa_disponible_kg_ms_ha', 'ndvi', 'evi', 
+                          'cobertura_vegetal', 'tipo_superficie', 'ev_ha', 'dias_permanencia', 
+                          'tasa_utilizacion', 'categoria_manejo']
+        
+        tabla_detalle = gdf_analizado[columnas_detalle].copy()
+        tabla_detalle.columns = ['Sub-Lote', 'Área (ha)', 'Biomasa Disp (kg MS/ha)', 'NDVI', 'EVI',
+                               'Cobertura', 'Tipo Superficie', 'EV/Ha', 'Días Permanencia', 
+                               'Tasa Utilización', 'Categoría']
+        
+        st.dataframe(tabla_detalle, use_container_width=True)
+        
+        # PASO 11: RECOMENDACIONES DE MANEJO
+        st.subheader("💡 RECOMENDACIONES DE MANEJO FORRAJERO")
+        
+        categorias = gdf_analizado['categoria_manejo'].unique()
+        for cat in sorted(categorias):
+            subset = gdf_analizado[gdf_analizado['categoria_manejo'] == cat]
+            area_cat = subset['area_ha'].sum()
+            
+            with st.expander(f"🎯 **{cat}** - {area_cat:.1f} ha ({(area_cat/area_total*100):.1f}% del área)"):
+                
+                if cat == "CRÍTICO":
+                    st.markdown("**🚨 ESTRATEGIA: ROTACIÓN INMEDIATA**")
+                    st.markdown("- Sacar animales inmediatamente")
+                    st.markdown("- Suplementación estratégica requerida")
+                    st.markdown("- Evaluar resiembra o recuperación")
+                    
+                elif cat == "ALERTA":
+                    st.markdown("**⚠️ ESTRATEGIA: ROTACIÓN CERCANA**")
+                    st.markdown("- Planificar rotación en 5-10 días")
+                    st.markdown("- Monitorear crecimiento diario")
+                    st.markdown("- Considerar suplementación ligera")
+                    
+                elif cat == "ADEQUADO":
+                    st.markdown("**✅ ESTRATEGIA: MANEJO ACTUAL**")
+                    st.markdown("- Continuar con rotación planificada")
+                    st.markdown("- Monitoreo semanal")
+                    st.markdown("- Ajustar carga si es necesario")
+                    
+                elif cat == "BUENO":
+                    st.markdown("**👍 ESTRATEGIA: MANTENIMIENTO**")
+                    st.markdown("- Carga animal adecuada")
+                    st.markdown("- Continuar manejo actual")
+                    st.markdown("- Enfoque en sostenibilidad")
+                    
+                else:  # ÓPTIMO
+                    st.markdown("**🌟 ESTRATEGIA: EXCELENTE**")
+                    st.markdown("- Condiciones óptimas")
+                    st.markdown("- Mantener prácticas actuales")
+                    st.markdown("- Modelo a replicar")
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Sub-Lotes", len(subset))
+                with col2:
+                    st.metric("Días Prom", f"{subset['dias_permanencia'].mean():.0f}")
+                with col3:
+                    st.metric("EV Prom", f"{subset['ev_soportable'].mean():.0f}")
+        
+        # PASO 12: RESUMEN EJECUTIVO
+        st.subheader("📋 RESUMEN EJECUTIVO")
+        
+        total_ev_soportable = gdf_analizado['ev_soportable'].sum()
+        dias_promedio = gdf_analizado['dias_permanencia'].mean()
+        biomasa_total = gdf_analizado['biomasa_total_kg'].sum()
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("🏭 CAPACIDAD TOTAL", f"{total_ev_soportable:.0f} EV")
+        with col2:
+            st.metric("📅 PERMANENCIA PROMEDIO", f"{dias_promedio:.0f} días")
+        with col3:
+            st.metric("🌿 BIOMASA TOTAL", f"{biomasa_total/1000:.1f} ton MS")
+        
+        # INFORMACIÓN TÉCNICA
+        with st.expander("🔍 VER METODOLOGÍA GEE DETALLADA"):
+            st.markdown(f"""
+            **🌐 METODOLOGÍA GOOGLE EARTH ENGINE - ANÁLISIS FORRAJERO MEJORADO**
+            
+            **🎯 PARÁMETROS {tipo_pastura}:**
+            - **Biomasa Óptima:** {PARAMETROS_FORRAJEROS[tipo_pastura]['MS_POR_HA_OPTIMO']} kg MS/ha
+            - **Crecimiento Diario:** {PARAMETROS_FORRAJEROS[tipo_pastura]['CRECIMIENTO_DIARIO']} kg MS/ha/día
+            - **Consumo por Vaca:** {PARAMETROS_FORRAJEROS[tipo_pastura]['CONSUMO_PORCENTAJE_PESO']*100}% del peso vivo
+            - **Cobertura Mínima:** {PARAMETROS_FORRAJEROS[tipo_pastura]['FACTOR_COBERTURA']*100}%
+            
+            **🛰️ ÍNDICES SATELITALES CALCULADOS:**
+            - **NDVI, EVI, SAVI:** Índices de vegetación
+            - **BSI, NDBI:** Índices de suelo desnudo/roca
+            - **NDWI:** Índice de contenido de agua
+            - **Cobertura Vegetal:** Estimación de área con vegetación real
+            
+            **🐄 MÉTRICAS GANADERAS:**
+            - **EV/Ha:** Carga animal sostenible por hectárea
+            - **Días de Permanencia:** Tiempo óptimo de pastoreo por sub-lote
+            - **Biomasa Disponible:** Forraje realmente aprovechable por el ganado
+            """)
+        
+        return True
+        
+    except Exception as e:
+        st.error(f"❌ Error en análisis forrajero: {str(e)}")
+        import traceback
+        st.error(f"Detalle: {traceback.format_exc()}")
+        return False
 
-# Procesar archivo cargado
-else:
-    # ✅ SOLUCIÓN: Verificar si el archivo es nuevo
-    current_file_id = f"{uploaded_zip.name}_{uploaded_zip.size}"
-    
-    if (not st.session_state.file_processed or 
-        st.session_state.current_file != current_file_id):
-        
-        st.session_state.file_processed = True
-        st.session_state.current_file = current_file_id
-        st.session_state.analysis_done = False
-    
-    with st.spinner("Cargando y analizando potrero..."):
+# INTERFAZ PRINCIPAL
+if uploaded_zip:
+    with st.spinner("Cargando potrero..."):
         try:
             with tempfile.TemporaryDirectory() as tmp_dir:
                 with zipfile.ZipFile(uploaded_zip, 'r') as zip_ref:
@@ -817,7 +973,7 @@ else:
                     shp_path = os.path.join(tmp_dir, shp_files[0])
                     gdf = gpd.read_file(shp_path)
                     
-                    st.success(f"✅ **Potrero cargado correctamente:** {len(gdf)} polígono(s)")
+                    st.success(f"✅ **Potrero cargado:** {len(gdf)} polígono(s)")
                     
                     area_total = calcular_superficie(gdf).sum()
                     
@@ -829,25 +985,50 @@ else:
                         st.write(f"- CRS: {gdf.crs}")
                     
                     with col2:
-                        st.write("**🎯 CONFIGURACIÓN VOISIN:**")
+                        st.write("**🎯 CONFIGURACIÓN GANADERA:**")
                         st.write(f"- Pastura: {tipo_pastura}")
+                        st.write(f"- Peso promedio: {peso_promedio} kg")
+                        st.write(f"- Carga animal: {carga_animal} cabezas")
                         st.write(f"- Sub-lotes: {n_divisiones}")
-                        st.write(f"- Descanso: {PARAMETROS_VOISIN['PERIODO_DESCANSO']} días")
                     
-                    # ✅ SOLUCIÓN: Botón con manejo de estado mejorado
-                    if not st.session_state.analysis_done:
-                        if st.button("🚀 EJECUTAR ANÁLISIS VOISIN COMPLETO", 
-                                   type="primary", 
-                                   use_container_width=True,
-                                   key="run_analysis_btn"):
-                            with st.spinner("Ejecutando análisis Voisin..."):
-                                analisis_voisin_completo(gdf, tipo_pastura, n_divisiones)
-                    else:
-                        st.info("✅ Análisis ya completado. Usa el botón 'Reiniciar' para un nuevo análisis.")
+                    if st.button("🚀 EJECUTAR ANÁLISIS FORRAJERO GEE", type="primary"):
+                        analisis_forrajero_completo(gdf, tipo_pastura, peso_promedio, carga_animal, n_divisiones)
                         
-                else:
-                    st.error("❌ No se encontró archivo .shp en el ZIP")
-                    
         except Exception as e:
-            st.error(f"❌ Error cargando el archivo: {str(e)}")
-            st.session_state.file_processed = False
+            st.error(f"Error cargando shapefile: {str(e)}")
+
+else:
+    st.info("📁 Sube el ZIP de tu potrero para comenzar el análisis forrajero")
+    
+    with st.expander("ℹ️ INFORMACIÓN SOBRE EL ANÁLISIS FORRAJERO GEE MEJORADO"):
+        st.markdown("""
+        **🌱 SISTEMA DE ANÁLISIS FORRAJERO (GEE) - VERSIÓN MEJORADA**
+        
+        **🆕 NUEVAS FUNCIONALIDADES:**
+        - **🌿 Detección de Suelo Desnudo:** Identifica áreas sin vegetación (roca, suelo pelado)
+        - **📊 Análisis de Cobertura:** Calcula porcentaje real de área con vegetación
+        - **🎯 Métricas Realistas:** Biomasa disponible considera solo áreas con vegetación
+        - **📈 Validación Mejorada:** Correlaciones corregidas entre variables
+        
+        **📊 FUNCIONALIDADES PRINCIPALES:**
+        - **🌿 Productividad Forrajera:** Biomasa disponible por hectárea
+        - **🐄 Equivalentes Vaca:** Capacidad de carga animal realista
+        - **📅 Días de Permanencia:** Tiempo de rotación estimado
+        - **🛰️ Metodología GEE:** Algoritmos científicos mejorados
+        
+        **🎯 TIPOS DE PASTURA SOPORTADOS:**
+        - **ALFALFA:** Alta productividad, buen rebrote
+        - **RAYGRASS:** Crecimiento rápido, buena calidad
+        - **FESTUCA:** Resistente, adecuada para suelos marginales
+        - **AGROPIRRO:** Tolerante a sequía, bajo mantenimiento
+        - **PASTIZAL NATURAL:** Pasturas naturales diversificadas
+        
+        **🚀 INSTRUCCIONES:**
+        1. **Sube** tu shapefile del potrero
+        2. **Selecciona** el tipo de pastura
+        3. **Configura** parámetros ganaderos (peso y carga)
+        4. **Define** número de sub-lotes para análisis
+        5. **Ejecuta** el análisis GEE mejorado
+        6. **Revisa** resultados y mapa de cobertura
+        7. **Descarga** mapas y reportes completos
+        """)
