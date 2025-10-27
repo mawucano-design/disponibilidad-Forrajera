@@ -12,29 +12,47 @@ from matplotlib.colors import LinearSegmentedColormap
 import io
 from shapely.geometry import Polygon
 import math
-import folium
-from streamlit_folium import st_folium
-import plotly.express as px
-import plotly.graph_objects as go
 
 # =================================================================
-# SISTEMA INTEGRADO DE GANADERÍA REGENERATIVA - VOISIN 
-# ADAPTADO DE GOOGLE EARTH ENGINE A STREAMLIT
+# CONFIGURACIÓN INICIAL - PREVENCIÓN DE ERRORES
 # =================================================================
 
-# Configuración de página
+# Configuración de página CON session state management
 st.set_page_config(
     page_title="🌱 Ganadería Regenerativa Voisin", 
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
+# ✅ SOLUCIÓN: Inicializar session state para evitar el error
+if 'file_processed' not in st.session_state:
+    st.session_state.file_processed = False
+if 'analysis_done' not in st.session_state:
+    st.session_state.analysis_done = False
+if 'current_file' not in st.session_state:
+    st.session_state.current_file = None
+if 'execution_count' not in st.session_state:
+    st.session_state.execution_count = 0
+
+# ✅ SOLUCIÓN: Función para limpiar estado
+def reset_analysis():
+    st.session_state.analysis_done = False
+    st.session_state.file_processed = False
+    st.session_state.current_file = None
+    st.rerun()
+
+# ✅ SOLUCIÓN: Función para limpiar cache de matplotlib
+def clear_matplotlib_cache():
+    plt.close('all')
+    import matplotlib
+    matplotlib.rcParams.update(matplotlib.rcParamsDefault)
+
 # Título principal
 st.title("🌱 SISTEMA DE GANADERÍA REGENERATIVA - METODOLOGÍA VOISIN")
 st.markdown("---")
 
 # =================================================================
-# PARÁMETROS DEL SISTEMA (Basados en tu código GEE)
+# PARÁMETROS DEL SISTEMA
 # =================================================================
 
 PARAMETROS_FORRAJEROS = {
@@ -95,7 +113,6 @@ PARAMETROS_FORRAJEROS = {
     }
 }
 
-# Parámetros del sistema Voisin
 PARAMETROS_VOISIN = {
     'CONSUMO_DIARIO_VACA': 12,
     'PESO_PROMEDIO_VACA': 450,
@@ -107,14 +124,12 @@ PARAMETROS_VOISIN = {
     'UMBRAL_NDVI': 0.2
 }
 
-# Paletas GEE adaptadas
 PALETAS_GEE = {
     'ESTADO': ['#d73027', '#fdae61', '#a1dab4', '#1a9641', '#006837'],
     'EVHA': ['#d73027', '#fc8d59', '#fee08b', '#d9ef8b', '#91cf60'],
     'DIAS_PERMANENCIA': ['#ffffcc', '#a1dab4', '#41b6c4', '#2c7fb8', '#253494']
 }
 
-# Leyendas del sistema
 LEYENDAS = {
     'ESTADO': {
         'titulo': 'Estado Forrajero (kg MS/ha)',
@@ -149,19 +164,18 @@ LEYENDAS = {
 }
 
 # =================================================================
-# FUNCIONES DEL SISTEMA (Adaptadas de GEE)
+# FUNCIONES DEL SISTEMA
 # =================================================================
 
 def calcular_superficie(gdf):
     """Calcula superficie en hectáreas"""
     try:
         if gdf.crs and gdf.crs.is_geographic:
-            # Si es geográfico, proyectar a UTM para cálculo de área
             gdf_proj = gdf.to_crs('EPSG:3857')
             area_m2 = gdf_proj.geometry.area
         else:
             area_m2 = gdf.geometry.area
-        return area_m2 / 10000  # Convertir a hectáreas
+        return area_m2 / 10000
     except Exception as e:
         st.warning(f"Advertencia en cálculo de área: {e}")
         return gdf.geometry.area / 10000
@@ -177,7 +191,6 @@ def dividir_potrero_voisin(gdf, n_divisiones):
     
     sub_poligonos = []
     
-    # Calcular número de filas y columnas para división más cuadrada
     n_cols = math.ceil(math.sqrt(n_divisiones))
     n_rows = math.ceil(n_divisiones / n_cols)
     
@@ -215,13 +228,12 @@ def dividir_potrero_voisin(gdf, n_divisiones):
         return gdf
 
 def calcular_indices_satelitales_simulados(gdf, tipo_pastura):
-    """Simula cálculo de índices satelitales (NDVI, EVI, SAVI)"""
+    """Simula cálculo de índices satelitales"""
     
     n_poligonos = len(gdf)
     resultados = []
     params = PARAMETROS_FORRAJEROS[tipo_pastura]
     
-    # Obtener centroides para gradiente espacial
     gdf_centroids = gdf.copy()
     gdf_centroids['centroid'] = gdf_centroids.geometry.centroid
     gdf_centroids['x'] = gdf_centroids.centroid.x
@@ -234,37 +246,34 @@ def calcular_indices_satelitales_simulados(gdf, tipo_pastura):
     y_min, y_max = min(y_coords), max(y_coords)
     
     for idx, row in gdf_centroids.iterrows():
-        # Normalizar posición para simular variación espacial
         x_norm = (row['x'] - x_min) / (x_max - x_min) if x_max != x_min else 0.5
         y_norm = (row['y'] - y_min) / (y_max - y_min) if y_max != y_min else 0.5
         
         patron_espacial = (x_norm * 0.6 + y_norm * 0.4)
         
-        # 1. NDVI - Índice de vegetación normalizado
+        # NDVI
         ndvi_base = 0.5 + (patron_espacial * 0.4)
         ndvi = ndvi_base + np.random.normal(0, 0.08)
         ndvi = max(0.1, min(0.9, ndvi))
         
-        # 2. EVI - Índice de vegetación mejorado
+        # EVI
         evi_base = 0.4 + (patron_espacial * 0.3)
         evi = evi_base + np.random.normal(0, 0.06)
         evi = max(0.1, min(0.8, evi))
         
-        # 3. SAVI - Índice de vegetación ajustado al suelo
+        # SAVI
         savi_base = 0.45 + (patron_espacial * 0.35)
         savi = savi_base + np.random.normal(0, 0.07)
         savi = max(0.15, min(0.85, savi))
         
-        # 4. Cálculo de biomasa basado en metodología GEE
+        # Biomasa
         biomasa_ndvi = (ndvi * params['FACTOR_BIOMASA_NDVI'] + params['OFFSET_BIOMASA'])
         biomasa_evi = (evi * params['FACTOR_BIOMASA_EVI'] + params['OFFSET_BIOMASA'])
         biomasa_savi = (savi * params['FACTOR_BIOMASA_SAVI'] + params['OFFSET_BIOMASA'])
         
-        # Promedio ponderado (como en GEE)
         biomasa_promedio = (biomasa_ndvi * 0.4 + biomasa_evi * 0.35 + biomasa_savi * 0.25)
         biomasa_promedio = max(100, min(6000, biomasa_promedio))
         
-        # Biomasa disponible (considerando eficiencia y pérdidas)
         biomasa_disponible = (biomasa_promedio * 
                              PARAMETROS_VOISIN['EFICIENCIA_COSECHA'] * 
                              (1 - PARAMETROS_VOISIN['PERDIDAS']))
@@ -281,18 +290,13 @@ def calcular_indices_satelitales_simulados(gdf, tipo_pastura):
     return resultados
 
 def calcular_ev_ha(biomasa_disponible, area_ha, tipo_pastura):
-    """Calcula Equivalentes Vaca por hectárea - Fórmula corregida"""
+    """Calcula Equivalentes Vaca por hectárea"""
     params_pastura = PARAMETROS_FORRAJEROS[tipo_pastura]
     params_voisin = PARAMETROS_VOISIN
     
-    # Biomasa total disponible en el sub-lote (kg)
     biomasa_total = biomasa_disponible * area_ha
-    
-    # FÓRMULA CORREGIDA (basada en tu código GEE):
-    # Biomasa (ton) / Consumo diario = EV por día
-    # Dividir por descanso UNA SOLA VEZ para obtener EV sostenibles
-    ev_ha = (biomasa_total * 0.001) / params_pastura['CONSUMO_VACA_DIA']  # ton / (kg/día)
-    ev_ha = ev_ha / params_voisin['PERIODO_DESCANSO']  # EV sostenibles durante descanso
+    ev_ha = (biomasa_total * 0.001) / params_pastura['CONSUMO_VACA_DIA']
+    ev_ha = ev_ha / params_voisin['PERIODO_DESCANSO']
     
     return max(0, min(5, ev_ha))
 
@@ -302,8 +306,6 @@ def calcular_dias_permanencia(biomasa_disponible, area_ha, tipo_pastura):
     params_voisin = PARAMETROS_VOISIN
     
     biomasa_total = biomasa_disponible * area_ha
-    
-    # Cálculo basado en consumo diario
     dias = (biomasa_total * 0.001) / (params_pastura['CONSUMO_VACA_DIA'] / 1000)
     
     return max(0, min(params_voisin['DIAS_MAXIMO_PASTOREO'], dias))
@@ -322,52 +324,18 @@ def clasificar_estado_forrajero(biomasa_disponible):
         return 0, "CRÍTICO"
 
 # =================================================================
-# INTERFAZ STREAMLIT - SIDEBAR
-# =================================================================
-
-with st.sidebar:
-    st.header("⚙️ CONFIGURACIÓN VOISIN")
-    
-    # Selección de pastura
-    tipo_pastura = st.selectbox(
-        "Tipo de Pastura:", 
-        ["ALFALFA", "RAYGRASS", "FESTUCA", "AGROPIRRO", "MEZCLA_NATURAL"]
-    )
-    
-    st.subheader("📊 PARÁMETROS GANADEROS")
-    
-    peso_promedio = st.slider("Peso promedio animal (kg):", 300, 600, 450)
-    carga_animal = st.slider("Carga animal (cabezas):", 10, 500, 100)
-    
-    # Parámetros Voisin
-    st.subheader("🎯 PARÁMETROS VOISIN")
-    consumo_diario = st.slider("Consumo diario (kg MS/vaca):", 8, 15, 12)
-    periodo_descanso = st.slider("Período descanso (días):", 20, 60, 35)
-    dias_max_pastoreo = st.slider("Días máx. pastoreo/lote:", 1, 7, 3)
-    
-    st.subheader("🗺️ DIVISIÓN DE POTRERO")
-    n_divisiones = st.slider("Número de sub-lotes:", min_value=4, max_value=20, value=8)
-    
-    st.subheader("📤 SUBIR POTRERO")
-    uploaded_zip = st.file_uploader("Subir ZIP con shapefile", type=['zip'])
-    
-    # Actualizar parámetros
-    PARAMETROS_VOISIN['CONSUMO_DIARIO_VACA'] = consumo_diario
-    PARAMETROS_VOISIN['PERIODO_DESCANSO'] = periodo_descanso
-    PARAMETROS_VOISIN['DIAS_MAXIMO_PASTOREO'] = dias_max_pastoreo
-    PARAMETROS_VOISIN['PESO_PROMEDIO_VACA'] = peso_promedio
-
-# =================================================================
-# FUNCIONES DE VISUALIZACIÓN
+# FUNCIONES DE VISUALIZACIÓN MEJORADAS
 # =================================================================
 
 def crear_mapa_voisin(gdf, tipo_analisis, tipo_pastura):
-    """Crea mapa con estilo GEE/Voisin"""
+    """Crea mapa con estilo GEE/Voisin - VERSIÓN MEJORADA"""
     try:
-        plt.close('all')
+        # ✅ SOLUCIÓN: Limpiar cache de matplotlib antes de crear figura
+        clear_matplotlib_cache()
+        
         fig, ax = plt.subplots(1, 1, figsize=(12, 10))
         
-        # Seleccionar paleta y parámetros según el análisis
+        # Seleccionar paleta y parámetros
         if tipo_analisis == "BIOMASA":
             cmap = LinearSegmentedColormap.from_list('biomasa_voisin', PALETAS_GEE['ESTADO'])
             vmin, vmax = 0, 1200
@@ -384,14 +352,16 @@ def crear_mapa_voisin(gdf, tipo_analisis, tipo_pastura):
             columna = 'dias_permanencia'
             titulo = 'Días de Permanencia'
         
-        # Plotear cada polígono con su valor
+        # Plotear cada polígono
         for idx, row in gdf.iterrows():
             valor = row[columna]
             valor_norm = (valor - vmin) / (vmax - vmin)
             valor_norm = max(0, min(1, valor_norm))
             color = cmap(valor_norm)
             
-            gdf.iloc[[idx]].plot(ax=ax, color=color, edgecolor='black', linewidth=2, alpha=0.8)
+            # ✅ SOLUCIÓN: Usar plot directo en lugar de iloc
+            poly = gpd.GeoSeries([row.geometry])
+            poly.plot(ax=ax, color=color, edgecolor='black', linewidth=2, alpha=0.8)
             
             # Etiqueta con valor
             centroid = row.geometry.centroid
@@ -405,8 +375,7 @@ def crear_mapa_voisin(gdf, tipo_analisis, tipo_pastura):
                        bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.9))
         
         # Configuración del mapa
-        ax.set_title(f'🌱 SISTEMA VOISIN - {tipo_pastura}\n'
-                    f'{tipo_analisis} - {titulo}', 
+        ax.set_title(f'🌱 SISTEMA VOISIN - {tipo_pastura}\n{tipo_analisis} - {titulo}', 
                     fontsize=16, fontweight='bold', pad=20)
         
         ax.set_xlabel('Longitud')
@@ -425,12 +394,16 @@ def crear_mapa_voisin(gdf, tipo_analisis, tipo_pastura):
         buf = io.BytesIO()
         plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
         buf.seek(0)
-        plt.close()
+        
+        # ✅ SOLUCIÓN: Cerrar figura explícitamente
+        plt.close(fig)
         
         return buf, titulo
         
     except Exception as e:
         st.error(f"❌ Error creando mapa: {str(e)}")
+        # ✅ SOLUCIÓN: Asegurar que matplotlib se limpie incluso en error
+        plt.close('all')
         return None, None
 
 def crear_leyenda_interactiva(tipo_leyenda):
@@ -449,13 +422,16 @@ def crear_leyenda_interactiva(tipo_leyenda):
                 st.write(f"**{rango['rango']}** - {rango['label']}")
 
 # =================================================================
-# ANÁLISIS PRINCIPAL
+# ANÁLISIS PRINCIPAL MEJORADO
 # =================================================================
 
 def analisis_voisin_completo(gdf, tipo_pastura, n_divisiones):
-    """Ejecuta análisis completo con metodología Voisin"""
+    """Ejecuta análisis completo con metodología Voisin - VERSIÓN MEJORADA"""
     
     try:
+        # ✅ SOLUCIÓN: Incrementar contador de ejecuciones
+        st.session_state.execution_count += 1
+        
         st.header(f"🌱 ANÁLISIS VOISIN - {tipo_pastura}")
         
         # 1. DIVIDIR POTRERO
@@ -488,21 +464,18 @@ def analisis_voisin_completo(gdf, tipo_pastura, n_divisiones):
         
         metricas_voisin = []
         for idx, row in gdf_analizado.iterrows():
-            # EV/Ha
             ev_ha = calcular_ev_ha(
                 row['biomasa_disponible_kg_ms_ha'], 
                 row['area_ha'], 
                 tipo_pastura
             )
             
-            # Días de permanencia
             dias_permanencia = calcular_dias_permanencia(
                 row['biomasa_disponible_kg_ms_ha'],
                 row['area_ha'],
                 tipo_pastura
             )
             
-            # Estado forrajero
             estado_valor, estado_label = clasificar_estado_forrajero(
                 row['biomasa_disponible_kg_ms_ha']
             )
@@ -547,40 +520,47 @@ def analisis_voisin_completo(gdf, tipo_pastura, n_divisiones):
         
         col1, col2, col3 = st.columns(3)
         
+        # ✅ SOLUCIÓN: Crear mapas de forma secuencial para evitar conflictos
         with col1:
             st.write("**🌿 BIOMASA DISPONIBLE**")
-            mapa_biomasa, _ = crear_mapa_voisin(gdf_analizado, "BIOMASA", tipo_pastura)
+            with st.spinner("Generando mapa de biomasa..."):
+                mapa_biomasa, _ = crear_mapa_voisin(gdf_analizado, "BIOMASA", tipo_pastura)
             if mapa_biomasa:
                 st.image(mapa_biomasa, use_container_width=True)
                 st.download_button(
                     "📥 Descargar Mapa Biomasa",
                     mapa_biomasa.getvalue(),
                     f"voisin_biomasa_{tipo_pastura}_{datetime.now().strftime('%Y%m%d_%H%M')}.png",
-                    "image/png"
+                    "image/png",
+                    key="download_biomasa"
                 )
         
         with col2:
             st.write("**🐄 CARGA ANIMAL**")
-            mapa_ev, _ = crear_mapa_voisin(gdf_analizado, "EV_HA", tipo_pastura)
+            with st.spinner("Generando mapa de EV/Ha..."):
+                mapa_ev, _ = crear_mapa_voisin(gdf_analizado, "EV_HA", tipo_pastura)
             if mapa_ev:
                 st.image(mapa_ev, use_container_width=True)
                 st.download_button(
                     "📥 Descargar Mapa EV/Ha",
                     mapa_ev.getvalue(),
                     f"voisin_evha_{tipo_pastura}_{datetime.now().strftime('%Y%m%d_%H%M')}.png",
-                    "image/png"
+                    "image/png",
+                    key="download_evha"
                 )
         
         with col3:
             st.write("**⏰ DÍAS PERMANENCIA**")
-            mapa_dias, _ = crear_mapa_voisin(gdf_analizado, "DIAS_PERMANENCIA", tipo_pastura)
+            with st.spinner("Generando mapa de permanencia..."):
+                mapa_dias, _ = crear_mapa_voisin(gdf_analizado, "DIAS_PERMANENCIA", tipo_pastura)
             if mapa_dias:
                 st.image(mapa_dias, use_container_width=True)
                 st.download_button(
                     "📥 Descargar Mapa Permanencia",
                     mapa_dias.getvalue(),
                     f"voisin_dias_{tipo_pastura}_{datetime.now().strftime('%Y%m%d_%H%M')}.png",
-                    "image/png"
+                    "image/png",
+                    key="download_dias"
                 )
         
         # 6. LEYENDAS INTERACTIVAS
@@ -613,7 +593,6 @@ def analisis_voisin_completo(gdf, tipo_pastura, n_divisiones):
         # 8. RECOMENDACIONES VOISIN
         st.subheader("💡 RECOMENDACIONES REGENERATIVAS")
         
-        # Análisis de estado general
         estado_counts = gdf_analizado['estado_label'].value_counts()
         
         col1, col2 = st.columns(2)
@@ -651,41 +630,46 @@ def analisis_voisin_completo(gdf, tipo_pastura, n_divisiones):
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            # Exportar datos completos
             csv = gdf_analizado.to_csv(index=False)
             st.download_button(
                 "📊 Descargar CSV Completo",
                 csv,
                 f"voisin_datos_completos_{tipo_pastura}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                "text/csv"
+                "text/csv",
+                key="download_csv"
             )
         
         with col2:
-            # Exportar resumen ejecutivo
             resumen = crear_resumen_ejecutivo(gdf_analizado, tipo_pastura, area_total)
             st.download_button(
                 "📋 Descargar Resumen",
                 resumen,
                 f"voisin_resumen_{tipo_pastura}_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
-                "text/plain"
+                "text/plain",
+                key="download_resumen"
             )
         
         with col3:
-            # Exportar todos los mapas
             def crear_pack_mapas():
-                files = [
-                    ("biomasa.png", mapa_biomasa.getvalue()),
-                    ("ev_ha.png", mapa_ev.getvalue()),
-                    ("dias_permanencia.png", mapa_dias.getvalue())
-                ]
+                files = []
+                if mapa_biomasa:
+                    files.append(("biomasa.png", mapa_biomasa.getvalue()))
+                if mapa_ev:
+                    files.append(("ev_ha.png", mapa_ev.getvalue()))
+                if mapa_dias:
+                    files.append(("dias_permanencia.png", mapa_dias.getvalue()))
                 return create_zip_file(files)
             
             st.download_button(
                 "🗂️ Descargar Pack Mapas",
                 crear_pack_mapas(),
                 f"voisin_mapas_{tipo_pastura}_{datetime.now().strftime('%Y%m%d_%H%M')}.zip",
-                "application/zip"
+                "application/zip",
+                key="download_zip"
             )
+        
+        # ✅ SOLUCIÓN: Marcar análisis como completado
+        st.session_state.analysis_done = True
         
         return True
         
@@ -747,14 +731,52 @@ def create_zip_file(files):
     return zip_buffer.getvalue()
 
 # =================================================================
-# INTERFAZ PRINCIPAL
+# SIDEBAR MEJORADO
+# =================================================================
+
+with st.sidebar:
+    st.header("⚙️ CONFIGURACIÓN VOISIN")
+    
+    # ✅ SOLUCIÓN: Botón para resetear la aplicación
+    if st.button("🔄 Reiniciar Aplicación", use_container_width=True):
+        reset_analysis()
+    
+    tipo_pastura = st.selectbox(
+        "Tipo de Pastura:", 
+        ["ALFALFA", "RAYGRASS", "FESTUCA", "AGROPIRRO", "MEZCLA_NATURAL"],
+        key="tipo_pastura_select"
+    )
+    
+    st.subheader("📊 PARÁMETROS GANADEROS")
+    
+    peso_promedio = st.slider("Peso promedio animal (kg):", 300, 600, 450, key="peso_slider")
+    carga_animal = st.slider("Carga animal (cabezas):", 10, 500, 100, key="carga_slider")
+    
+    st.subheader("🎯 PARÁMETROS VOISIN")
+    consumo_diario = st.slider("Consumo diario (kg MS/vaca):", 8, 15, 12, key="consumo_slider")
+    periodo_descanso = st.slider("Período descanso (días):", 20, 60, 35, key="descanso_slider")
+    dias_max_pastoreo = st.slider("Días máx. pastoreo/lote:", 1, 7, 3, key="dias_slider")
+    
+    st.subheader("🗺️ DIVISIÓN DE POTRERO")
+    n_divisiones = st.slider("Número de sub-lotes:", min_value=4, max_value=20, value=8, key="divisiones_slider")
+    
+    st.subheader("📤 SUBIR POTRERO")
+    uploaded_zip = st.file_uploader("Subir ZIP con shapefile", type=['zip'], key="file_uploader")
+    
+    # Actualizar parámetros
+    PARAMETROS_VOISIN['CONSUMO_DIARIO_VACA'] = consumo_diario
+    PARAMETROS_VOISIN['PERIODO_DESCANSO'] = periodo_descanso
+    PARAMETROS_VOISIN['DIAS_MAXIMO_PASTOREO'] = dias_max_pastoreo
+    PARAMETROS_VOISIN['PESO_PROMEDIO_VACA'] = peso_promedio
+
+# =================================================================
+# INTERFAZ PRINCIPAL MEJORADA
 # =================================================================
 
 # Mostrar información inicial si no hay archivo cargado
 if not uploaded_zip:
     st.info("📁 Sube el ZIP de tu potrero para comenzar el análisis Voisin")
     
-    # Información del sistema
     with st.expander("ℹ️ INFORMACIÓN DEL SISTEMA VOISIN"):
         st.markdown("""
         **🌱 SISTEMA DE GANADERÍA REGENERATIVA VOISIN**
@@ -770,25 +792,26 @@ if not uploaded_zip:
         - **Biomasa Estimada:** Algoritmos científicos probados
         - **Análisis Espacial:** Variabilidad dentro del potrero
         - **Recomendaciones Precise:** Basadas en datos reales
-        
-        **🚀 INSTRUCCIONES:**
-        1. **Sube** shapefile del potrero (ZIP)
-        2. **Selecciona** tipo de pastura
-        3. **Configura** parámetros Voisin
-        4. **Ejecuta** análisis regenerativo
-        5. **Descarga** mapas y reportes
         """)
 
 # Procesar archivo cargado
 else:
+    # ✅ SOLUCIÓN: Verificar si el archivo es nuevo
+    current_file_id = f"{uploaded_zip.name}_{uploaded_zip.size}"
+    
+    if (not st.session_state.file_processed or 
+        st.session_state.current_file != current_file_id):
+        
+        st.session_state.file_processed = True
+        st.session_state.current_file = current_file_id
+        st.session_state.analysis_done = False
+    
     with st.spinner("Cargando y analizando potrero..."):
         try:
             with tempfile.TemporaryDirectory() as tmp_dir:
-                # Extraer archivo ZIP
                 with zipfile.ZipFile(uploaded_zip, 'r') as zip_ref:
                     zip_ref.extractall(tmp_dir)
                 
-                # Buscar archivo shapefile
                 shp_files = [f for f in os.listdir(tmp_dir) if f.endswith('.shp')]
                 if shp_files:
                     shp_path = os.path.join(tmp_dir, shp_files[0])
@@ -796,7 +819,6 @@ else:
                     
                     st.success(f"✅ **Potrero cargado correctamente:** {len(gdf)} polígono(s)")
                     
-                    # Mostrar información del potrero
                     area_total = calcular_superficie(gdf).sum()
                     
                     col1, col2 = st.columns(2)
@@ -811,14 +833,21 @@ else:
                         st.write(f"- Pastura: {tipo_pastura}")
                         st.write(f"- Sub-lotes: {n_divisiones}")
                         st.write(f"- Descanso: {PARAMETROS_VOISIN['PERIODO_DESCANSO']} días")
-                        st.write(f"- Consumo: {PARAMETROS_VOISIN['CONSUMO_DIARIO_VACA']} kg/día")
                     
-                    # Botón para ejecutar análisis
-                    if st.button("🚀 EJECUTAR ANÁLISIS VOISIN COMPLETO", type="primary", use_container_width=True):
-                        analisis_voisin_completo(gdf, tipo_pastura, n_divisiones)
+                    # ✅ SOLUCIÓN: Botón con manejo de estado mejorado
+                    if not st.session_state.analysis_done:
+                        if st.button("🚀 EJECUTAR ANÁLISIS VOISIN COMPLETO", 
+                                   type="primary", 
+                                   use_container_width=True,
+                                   key="run_analysis_btn"):
+                            with st.spinner("Ejecutando análisis Voisin..."):
+                                analisis_voisin_completo(gdf, tipo_pastura, n_divisiones)
+                    else:
+                        st.info("✅ Análisis ya completado. Usa el botón 'Reiniciar' para un nuevo análisis.")
                         
                 else:
                     st.error("❌ No se encontró archivo .shp en el ZIP")
                     
         except Exception as e:
             st.error(f"❌ Error cargando el archivo: {str(e)}")
+            st.session_state.file_processed = False
