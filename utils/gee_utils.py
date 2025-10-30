@@ -1,4 +1,4 @@
-# Placeholder for Google Earth Engine functions
+# Placeholder functions
 def initialize_earth_engine():
     return False
 
