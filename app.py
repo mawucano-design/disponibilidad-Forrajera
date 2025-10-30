@@ -11,17 +11,13 @@ import io
 from shapely.geometry import Polygon
 import math
 
-# Import utils
-from utils.gee_utils import initialize_earth_engine, get_sentinel2_image, extract_satellite_values
-from utils.mapping_utils import create_interactive_map
-from utils.analysis_utils import calculate_area, divide_pasture
-
 # Import st_folium
 from streamlit_folium import st_folium
+import folium
 
 # Page config
-st.set_page_config(page_title="🌱 Analizador Forrajero GEE", layout="wide")
-st.title("🌱 ANALIZADOR FORRAJERO - METODOLOGÍA GEE")
+st.set_page_config(page_title="🌱 Analizador Forrajero", layout="wide")
+st.title("🌱 ANALIZADOR FORRAJERO")
 st.markdown("---")
 
 # Initialize session state
@@ -32,38 +28,125 @@ if 'gdf_dividido' not in st.session_state:
 if 'analysis_results' not in st.session_state:
     st.session_state.analysis_results = None
 
-# Sidebar
-with st.sidebar:
-    st.header("⚙️ Configuración")
-    
-    tipo_pastura = st.selectbox("Tipo de Pastura:", 
-                               ["ALFALFA", "RAYGRASS", "FESTUCA", "AGROPIRRO", "PASTIZAL_NATURAL", "PERSONALIZADO"])
-    
-    st.subheader("📊 Parámetros Ganaderos")
-    peso_promedio = st.slider("Peso promedio animal (kg):", 300, 600, 450)
-    carga_animal = st.slider("Carga animal (cabezas):", 50, 1000, 100)
-    
-    st.subheader("🎯 División de Potrero")
-    n_divisiones = st.slider("Número de sub-lotes:", min_value=12, max_value=32, value=24)
-    
-    st.subheader("🛰️ Configuración Satelital")
-    fecha_inicio = st.date_input("Fecha inicio análisis", value=datetime(2024, 1, 1))
-    fecha_fin = st.date_input("Fecha fin análisis", value=datetime(2024, 12, 31))
-    nubosidad_maxima = st.slider("Nubosidad máxima (%)", 0, 50, 20)
-    
-    st.subheader("📤 Subir Lote")
-    uploaded_zip = st.file_uploader("Subir ZIP con shapefile del potrero", type=['zip'])
+# Funciones auxiliares
+def calculate_area(gdf):
+    """Calculate area in hectares"""
+    try:
+        if gdf.crs and gdf.crs.is_geographic:
+            area_m2 = gdf.geometry.area * 10000000000
+        else:
+            area_m2 = gdf.geometry.area
+        return area_m2 / 10000
+    except:
+        return gdf.geometry.area / 10000
 
-    # Botón para limpiar análisis
-    if st.button("🔄 Limpiar Análisis"):
-        st.session_state.analysis_done = False
-        st.session_state.gdf_dividido = None
-        st.session_state.analysis_results = None
-        st.rerun()
+def divide_pasture(gdf, n_zones):
+    """Divide pasture into sub-lots"""
+    if len(gdf) == 0:
+        return gdf
+    
+    main_pasture = gdf.iloc[0].geometry
+    bounds = main_pasture.bounds
+    minx, miny, maxx, maxy = bounds
+    
+    sub_polygons = []
+    
+    n_cols = math.ceil(math.sqrt(n_zones))
+    n_rows = math.ceil(n_zones / n_cols)
+    
+    width = (maxx - minx) / n_cols
+    height = (maxy - miny) / n_rows
+    
+    for i in range(n_rows):
+        for j in range(n_cols):
+            if len(sub_polygons) >= n_zones:
+                break
+                
+            cell_minx = minx + (j * width)
+            cell_maxx = minx + ((j + 1) * width)
+            cell_miny = miny + (i * height)
+            cell_maxy = miny + ((i + 1) * height)
+            
+            cell_poly = Polygon([
+                (cell_minx, cell_miny),
+                (cell_maxx, cell_miny),
+                (cell_maxx, cell_maxy),
+                (cell_minx, cell_maxy)
+            ])
+            
+            intersection = main_pasture.intersection(cell_poly)
+            if not intersection.is_empty and intersection.area > 0:
+                sub_polygons.append(intersection)
+    
+    if sub_polygons:
+        new_gdf = gpd.GeoDataFrame({
+            'id_subLote': range(1, len(sub_polygons) + 1),
+            'geometry': sub_polygons
+        }, crs=gdf.crs)
+        return new_gdf
+    else:
+        return gdf
 
-# Función para simular análisis forrajero (temporal)
+def create_interactive_map(gdf, pasture_type, analysis_results):
+    """Create interactive map"""
+    try:
+        # Get centroid of study area
+        centroid = gdf.geometry.centroid.iloc[0]
+        center_lat, center_lon = centroid.y, centroid.x
+        
+        # Create base map
+        m = folium.Map(
+            location=[center_lat, center_lon],
+            zoom_start=12
+        )
+        
+        # Add sub-lot polygons
+        if analysis_results is not None:
+            for idx, row in gdf.iterrows():
+                sub_lot_id = row['id_subLote']
+                biomass = analysis_results[idx]['biomasa_disponible_kg_ms_ha']
+                
+                # Color based on biomass
+                if biomass < 200:
+                    color = 'red'
+                elif biomass < 400:
+                    color = 'orange'
+                elif biomass < 600:
+                    color = 'yellow'
+                elif biomass < 800:
+                    color = 'lightgreen'
+                else:
+                    color = 'darkgreen'
+                
+                # Create polygon
+                geom = row.geometry
+                if geom.geom_type == 'Polygon':
+                    coords = [[point[1], point[0]] for point in geom.exterior.coords]
+                    
+                    folium.Polygon(
+                        locations=coords,
+                        popup=f"""
+                        <b>Sub-Lote S{sub_lot_id}</b><br>
+                        Biomasa: {biomass} kg MS/ha<br>
+                        NDVI: {analysis_results[idx]['ndvi']:.3f}<br>
+                        Tipo: {analysis_results[idx]['tipo_superficie']}
+                        """,
+                        tooltip=f'S{sub_lot_id} - {biomass} kg MS/ha',
+                        color=color,
+                        fill_color=color,
+                        fill_opacity=0.5,
+                        weight=2
+                    ).add_to(m)
+        
+        return m
+        
+    except Exception as e:
+        st.error(f"Error creando mapa: {str(e)}")
+        # Return a simple map as fallback
+        return folium.Map(location=[-34.0, -64.0], zoom_start=4)
+
 def simular_analisis_forrajero(gdf_dividido, tipo_pastura):
-    """Simula el análisis forrajero - reemplazar con tu lógica real"""
+    """Simula el análisis forrajero"""
     resultados = []
     for i in range(len(gdf_dividido)):
         # Simular datos basados en el tipo de pastura
@@ -87,6 +170,30 @@ def simular_analisis_forrajero(gdf_dividido, tipo_pastura):
             'factor_calidad': np.random.uniform(0.5, 0.9)
         })
     return resultados
+
+# Sidebar
+with st.sidebar:
+    st.header("⚙️ Configuración")
+    
+    tipo_pastura = st.selectbox("Tipo de Pastura:", 
+                               ["ALFALFA", "RAYGRASS", "FESTUCA", "AGROPIRRO", "PASTIZAL_NATURAL", "PERSONALIZADO"])
+    
+    st.subheader("📊 Parámetros Ganaderos")
+    peso_promedio = st.slider("Peso promedio animal (kg):", 300, 600, 450)
+    carga_animal = st.slider("Carga animal (cabezas):", 50, 1000, 100)
+    
+    st.subheader("🎯 División de Potrero")
+    n_divisiones = st.slider("Número de sub-lotes:", min_value=4, max_value=32, value=12)
+    
+    st.subheader("📤 Subir Lote")
+    uploaded_zip = st.file_uploader("Subir ZIP con shapefile del potrero", type=['zip'])
+
+    # Botón para limpiar análisis
+    if st.button("🔄 Limpiar Análisis"):
+        st.session_state.analysis_done = False
+        st.session_state.gdf_dividido = None
+        st.session_state.analysis_results = None
+        st.rerun()
 
 # Main application
 if uploaded_zip:
@@ -115,10 +222,10 @@ if uploaded_zip:
                     with col2:
                         st.write("**🎯 CONFIGURACIÓN:**")
                         st.write(f"- Pastura: {tipo_pastura}")
-                        st.write(f"- Período: {fecha_inicio} a {fecha_fin}")
                         st.write(f"- Sub-lotes: {n_divisiones}")
+                        st.write(f"- Carga animal: {carga_animal} cabezas")
                     
-                    # Solo ejecutar análisis si no se ha hecho antes o si se solicita explícitamente
+                    # Solo ejecutar análisis si no se ha hecho antes
                     if not st.session_state.analysis_done:
                         if st.button("🚀 EJECUTAR ANÁLISIS FORRAJERO", type="primary"):
                             
@@ -147,7 +254,6 @@ if uploaded_zip:
                         # Crear mapa
                         mapa = create_interactive_map(
                             st.session_state.gdf_dividido, 
-                            None,  # No image for now
                             tipo_pastura, 
                             st.session_state.analysis_results
                         )
@@ -174,7 +280,7 @@ if uploaded_zip:
                         with col2:
                             st.metric("NDVI Promedio", f"{np.mean(ndvis):.3f}")
                         with col3:
-                            st.metric("Sub-lotes Analizados", len(st.session_state.gdf_dividido))
+                            st.metric("Sub-lotes", len(st.session_state.gdf_dividido))
                         with col4:
                             # Calcular categorías
                             categorias = {}
@@ -192,9 +298,9 @@ if uploaded_zip:
                             'Sub-Lote': range(1, len(st.session_state.analysis_results) + 1),
                             'Biomasa (kg MS/ha)': [r['biomasa_disponible_kg_ms_ha'] for r in st.session_state.analysis_results],
                             'NDVI': [r['ndvi'] for r in st.session_state.analysis_results],
-                            'Cobertura': [r['cobertura_vegetal'] for r in st.session_state.analysis_results],
+                            'Cobertura': [f"{r['cobertura_vegetal']:.1%}" for r in st.session_state.analysis_results],
                             'Tipo Superficie': [r['tipo_superficie'] for r in st.session_state.analysis_results],
-                            'Crecimiento (kg/día)': [r['crecimiento_diario'] for r in st.session_state.analysis_results]
+                            'Crecimiento (kg/día)': [f"{r['crecimiento_diario']:.1f}" for r in st.session_state.analysis_results]
                         })
                         
                         st.dataframe(df_resultados, use_container_width=True)
@@ -209,27 +315,14 @@ if uploaded_zip:
                         ax.grid(True, alpha=0.3)
                         st.pyplot(fig)
                         
-                        # Información adicional
-                        st.subheader("🔍 INFORMACIÓN TÉCNICA")
-                        with st.expander("Ver detalles técnicos"):
-                            st.markdown(f"""
-                            **Parámetros utilizados:**
-                            - Tipo de pastura: {tipo_pastura}
-                            - Período de análisis: {fecha_inicio} a {fecha_fin}
-                            - Nubosidad máxima: {nubosidad_maxima}%
-                            - Peso promedio animal: {peso_promedio} kg
-                            - Carga animal: {carga_animal} cabezas
-                            
-                            **Métricas calculadas:**
-                            - Biomasa disponible (kg MS/ha)
-                            - Índices de vegetación (NDVI, EVI, SAVI)
-                            - Cobertura vegetal (%)
-                            - Tipo de superficie
-                            - Crecimiento diario estimado
-                            """)
-                        
         except Exception as e:
             st.error(f"Error cargando shapefile: {str(e)}")
+            st.info("""
+            **Posibles soluciones:**
+            - Verifica que el ZIP contenga todos los archivos del shapefile (.shp, .shx, .dbf, .prj)
+            - Asegúrate de que el shapefile tenga un sistema de coordenadas válido
+            - Intenta con un shapefile más simple para probar
+            """)
 
 else:
     st.info("📁 Sube el ZIP de tu potrero para comenzar el análisis forrajero")
@@ -242,25 +335,16 @@ else:
         **Funcionalidades:**
         - 🗺️ Visualización interactiva de potreros
         - 📊 Análisis de biomasa y productividad
-        - 🌿 Cálculo de índices de vegetación
+        - 🌿 Cálculo de índices de vegetación simulados
         - 🐄 Estimación de capacidad ganadera
-        - 🛰️ Preparado para integración con Sentinel-2
-        
-        **Características técnicas:**
-        - Mapa interactivo con Google Satellite
-        - División automática en sub-lotes
-        - Análisis espacial detallado
-        - Exportación de resultados
+        - 📈 Gráficos y estadísticas
         
         **Instrucciones de uso:**
-        1. **Prepara tu shapefile** (.shp, .shx, .dbf, .prj) en un ZIP
-        2. **Configura los parámetros** en la barra lateral
-        3. **Ejecuta el análisis** y visualiza los resultados
-        4. **Explora el mapa interactivo** y las métricas calculadas
+        1. **Prepara tu shapefile** - Asegúrate de tener todos los archivos (.shp, .shx, .dbf, .prj)
+        2. **Comprime en ZIP** - Crea un archivo ZIP con todos los archivos del shapefile
+        3. **Configura los parámetros** en la barra lateral
+        4. **Ejecuta el análisis** y visualiza los resultados
         
-        **Próximas funcionalidades:**
-        - Integración con Google Earth Engine
-        - Datos satelitales en tiempo real
-        - Análisis histórico de productividad
-        - Recomendaciones de manejo automatizadas
+        **Nota:** Esta versión usa datos simulados. Para análisis con datos satelitales reales, 
+        ejecuta la aplicación localmente con Google Earth Engine.
         """)
