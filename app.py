@@ -20,7 +20,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # =============================================================================
-# CONFIGURACIÓN EARTH ENGINE
+# CONFIGURACIÓN EARTH ENGINE MEJORADA
 # =============================================================================
 
 # Configurar página
@@ -44,6 +44,8 @@ if 'analisis_completado' not in st.session_state:
     st.session_state.analisis_completado = False
 if 'ee_initialized' not in st.session_state:
     st.session_state.ee_initialized = False
+if 'auth_attempted' not in st.session_state:
+    st.session_state.auth_attempted = False
 
 # Manejo de Earth Engine
 try:
@@ -56,7 +58,7 @@ except ImportError:
     st.sidebar.error("❌ Earth Engine no instalado")
 
 def initialize_earth_engine():
-    """Inicializa Earth Engine con manejo de errores"""
+    """Inicializa Earth Engine con autenticación automática"""
     if not EE_AVAILABLE:
         return False
         
@@ -66,7 +68,22 @@ def initialize_earth_engine():
         return True
     except ee.EEException as e:
         if "Please authenticate" in str(e):
-            show_authentication_instructions()
+            if not st.session_state.auth_attempted:
+                st.session_state.auth_attempted = True
+                st.sidebar.warning("🔐 Intentando autenticación automática...")
+                try:
+                    # Intentar autenticación automática
+                    ee.Authenticate()
+                    ee.Initialize()
+                    st.session_state.ee_initialized = True
+                    st.sidebar.success("✅ Autenticación automática exitosa!")
+                    st.rerun()
+                    return True
+                except Exception as auth_error:
+                    st.sidebar.error("❌ Autenticación automática falló")
+                    return False
+            else:
+                show_authentication_instructions()
         else:
             st.sidebar.error(f"❌ Error Earth Engine: {str(e)}")
         return False
@@ -75,31 +92,50 @@ def initialize_earth_engine():
         return False
 
 def show_authentication_instructions():
-    """Muestra instrucciones de autenticación"""
-    with st.sidebar.expander("🔐 CONFIGURAR EARTH ENGINE", expanded=True):
-        st.markdown("""
-        ### Para usar Sentinel-2 real:
+    """Muestra instrucciones de autenticación detalladas"""
+    with st.sidebar.expander("🔐 CONFIGURAR EARTH ENGINE - ee-mawucano25", expanded=True):
+        st.markdown(f"""
+        ### Para la cuenta: **ee-mawucano25**
         
-        1. **Ejecuta en terminal:**
+        **📋 PASOS EN CODESPACES:**
+        
+        1. **Abre la terminal** (Terminal → New Terminal)
+        2. **Ejecuta este comando:**
         ```bash
         earthengine authenticate
         ```
+        3. **En el navegador que se abre:**
+           - Email: `ee-mawucano25@gmail.com`
+           - Contraseña: [tu contraseña normal]
+           - Autoriza Earth Engine
+           - Copia el código de verificación
+        4. **Pega el código** en la terminal
+        5. **Reinicia la aplicación**
         
-        2. **Sigue las instrucciones en el navegador**
+        **🔧 VERIFICACIÓN:**
+        ```bash
+        python -c "import ee; ee.Initialize(); print('✅ Conectado como ee-mawucano25')"
+        ```
         
-        3. **Reinicia la aplicación**
-        
-        📍 **Requiere:** Cuenta de Google Earth Engine aprobada
+        **📞 Si tienes problemas:**
+        - Verifica que tu cuenta Earth Engine esté aprobada
+        - Asegúrate de usar la cuenta correcta
+        - Revisa que no haya bloqueos de seguridad
         """)
         
-        if st.button("🔄 Reiniciar App"):
-            st.rerun()
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔄 Reiniciar App", key="restart_btn"):
+                st.rerun()
+        with col2:
+            if st.button("📋 Copiar Comando", key="copy_cmd"):
+                st.code("earthengine authenticate", language="bash")
 
 # Inicializar Earth Engine
 ee_initialized = initialize_earth_engine() if EE_AVAILABLE else False
 
 # =============================================================================
-# CLASE PARA SENTINEL-2 REAL
+# CLASE SENTINEL-2 (igual que antes)
 # =============================================================================
 
 class Sentinel2Processor:
@@ -147,27 +183,7 @@ class Sentinel2Processor:
                 }
             ).rename('SAVI')
             
-            # MSAVI2
-            msavi2 = image.expression(
-                '(2 * NIR + 1 - sqrt(pow((2 * NIR + 1), 2) - 8 * (NIR - RED))) / 2',
-                {
-                    'NIR': image.select('B8'),
-                    'RED': image.select('B4')
-                }
-            ).rename('MSAVI2')
-            
-            # BSI - Bare Soil Index
-            bsi = image.expression(
-                '((RED + SWIR1) - (NIR + BLUE)) / ((RED + SWIR1) + (NIR + BLUE))',
-                {
-                    'BLUE': image.select('B2'),
-                    'RED': image.select('B4'),
-                    'NIR': image.select('B8'),
-                    'SWIR1': image.select('B11')
-                }
-            ).rename('BSI')
-            
-            image_with_indices = image.addBands([ndvi, evi, savi, msavi2, bsi])
+            image_with_indices = image.addBands([ndvi, evi, savi])
             return image_with_indices
             
         except Exception as e:
@@ -185,14 +201,8 @@ class Sentinel2Processor:
             if collection is None:
                 return None
                 
-            # Ordenar por nubosidad y proximidad a fecha objetivo
-            def add_date_difference(img):
-                date_diff = ee.Number(img.date().difference(ee.Date(target_date), 'day')).abs()
-                return img.set('date_difference', date_diff)
-            
-            collection = collection.map(add_date_difference)
-            collection = collection.sort('date_difference').sort('CLOUDY_PIXEL_PERCENTAGE')
-            
+            # Ordenar por nubosidad
+            collection = collection.sort('CLOUDY_PIXEL_PERCENTAGE')
             best_image = collection.first()
             
             # Calcular índices de vegetación
@@ -226,7 +236,7 @@ class Sentinel2Processor:
             return None
 
 # =============================================================================
-# PARÁMETROS FORRAJEROS
+# PARÁMETROS FORRAJEROS (igual que antes)
 # =============================================================================
 
 PARAMETROS_FORRAJEROS_BASE = {
@@ -292,7 +302,7 @@ def obtener_parametros_forrajeros(tipo_pastura):
     return PARAMETROS_FORRAJEROS_BASE.get(tipo_pastura, PARAMETROS_FORRAJEROS_BASE['FESTUCA'])
 
 # =============================================================================
-# FUNCIONES BÁSICAS
+# FUNCIONES BÁSICAS (igual que antes)
 # =============================================================================
 
 def calcular_superficie(gdf):
@@ -360,22 +370,132 @@ def dividir_potrero_en_subLotes(gdf, n_zonas):
         return gdf
 
 # =============================================================================
-# CÁLCULOS FORRAJEROS
+# ANÁLISIS CON SENTINEL-2 REAL
 # =============================================================================
 
-def clasificar_vegetacion_sentinel(ndvi, evi, savi, bsi):
-    """Clasifica vegetación basada en índices Sentinel-2"""
-    if ndvi is None:
-        return "DATOS_NO_DISPONIBLES"
-    
-    if ndvi < 0.2:
-        return "SUELO_DESNUDO"
-    elif ndvi < 0.4:
-        return "VEGETACION_ESCASA"
-    elif ndvi < 0.6:
-        return "VEGETACION_MODERADA"
-    else:
-        return "VEGETACION_DENSA"
+def analisis_forrajero_sentinel(gdf, config):
+    """Función principal de análisis con Sentinel-2 real"""
+    try:
+        st.header("🌱 ANÁLISIS FORRAJERO - SENTINEL-2 REAL")
+        
+        # Verificar Earth Engine
+        if not ee_initialized:
+            st.error("❌ Earth Engine no configurado")
+            return False
+        
+        area_total = calcular_superficie(gdf).sum()
+        st.success(f"✅ Potrero cargado: {area_total:.1f} ha, {len(gdf)} polígonos")
+        
+        # PASO 1: Dividir potrero
+        st.subheader("📐 DIVIDIENDO POTRERO EN SUB-LOTES")
+        with st.spinner("Dividiendo potrero..."):
+            gdf_dividido = dividir_potrero_en_subLotes(gdf, config['n_divisiones'])
+        
+        if gdf_dividido is None or len(gdf_dividido) == 0:
+            st.error("❌ Error: No se pudieron crear sub-lotes")
+            return False
+            
+        st.success(f"✅ Potrero dividido en {len(gdf_dividido)} sub-lotes")
+        
+        # PASO 2: Obtener datos Sentinel-2
+        st.subheader("🛰️ OBTENIENDO DATOS SENTINEL-2")
+        
+        processor = Sentinel2Processor()
+        resultados = []
+        
+        # Convertir geometría principal a EE
+        geojson_dict = json.loads(gdf.to_json())
+        geometry_principal = ee.Geometry(geojson_dict['features'][0]['geometry'])
+        
+        # Obtener imagen para toda el área
+        with st.spinner("Descargando imagen Sentinel-2..."):
+            imagen_completa = processor.get_best_image(
+                geometry_principal, 
+                config['fecha_imagen'], 
+                config['nubes_max']
+            )
+        
+        if imagen_completa is None:
+            st.error("❌ No se pudo obtener imagen Sentinel-2")
+            return False
+        
+        st.success("✅ Imagen Sentinel-2 obtenida correctamente")
+        
+        # Procesar cada sub-lote
+        progress_bar = st.progress(0)
+        for idx, row in gdf_dividido.iterrows():
+            progress = (idx + 1) / len(gdf_dividido)
+            progress_bar.progress(progress)
+            
+            # Convertir sub-geometría a EE
+            sub_geojson = json.loads(gpd.GeoSeries([row.geometry]).to_json())
+            sub_geometry = ee.Geometry(sub_geojson['features'][0]['geometry'])
+            
+            # Extraer valores para el sub-lote
+            valores = processor.extract_values_for_geometry(imagen_completa, sub_geometry)
+            
+            if valores:
+                ndvi = valores.get('NDVI')
+                evi = valores.get('EVI')
+                savi = valores.get('SAVI')
+            else:
+                ndvi = evi = savi = None
+            
+            # Calcular biomasa
+            biomasa_total = calcular_biomasa_sentinel(ndvi, config['tipo_pastura'])
+            biomasa_disponible = biomasa_total * 0.6
+            
+            # Clasificar vegetación
+            if ndvi is None:
+                tipo_vegetacion = "DATOS_NO_DISPONIBLES"
+            elif ndvi < 0.2:
+                tipo_vegetacion = "SUELO_DESNUDO"
+            elif ndvi < 0.4:
+                tipo_vegetacion = "VEGETACION_ESCASA"
+            elif ndvi < 0.6:
+                tipo_vegetacion = "VEGETACION_MODERADA"
+            else:
+                tipo_vegetacion = "VEGETACION_DENSA"
+            
+            # Calcular área
+            area_ha = calcular_superficie(gpd.GeoDataFrame([row], crs=gdf_dividido.crs))
+            if hasattr(area_ha, 'iloc'):
+                area_ha = area_ha.iloc[0]
+            elif hasattr(area_ha, '__getitem__'):
+                area_ha = area_ha[0]
+            
+            resultados.append({
+                'id_subLote': row['id_subLote'],
+                'area_ha': area_ha,
+                'ndvi': ndvi,
+                'evi': evi,
+                'savi': savi,
+                'tipo_superficie': tipo_vegetacion,
+                'biomasa_total_kg_ms_ha': biomasa_total,
+                'biomasa_disponible_kg_ms_ha': biomasa_disponible,
+                'crecimiento_diario': obtener_parametros_forrajeros(config['tipo_pastura'])['CRECIMIENTO_DIARIO'],
+                'fuente_datos': 'SENTINEL-2'
+            })
+        
+        progress_bar.empty()
+        
+        # Crear GeoDataFrame con resultados
+        gdf_analizado = gdf_dividido.copy()
+        for col in ['area_ha', 'ndvi', 'evi', 'savi', 'tipo_superficie', 
+                   'biomasa_total_kg_ms_ha', 'biomasa_disponible_kg_ms_ha', 'crecimiento_diario', 'fuente_datos']:
+            gdf_analizado[col] = [r[col] for r in resultados]
+        
+        # PASO 3: Mostrar resultados
+        mostrar_resultados_sentinel(gdf_analizado, config)
+        
+        st.session_state.analisis_completado = True
+        return True
+        
+    except Exception as e:
+        st.error(f"❌ Error en análisis: {str(e)}")
+        import traceback
+        st.error(f"Detalle: {traceback.format_exc()}")
+        return False
 
 def calcular_biomasa_sentinel(ndvi, tipo_pastura):
     """Calcula biomasa basada en NDVI real de Sentinel-2"""
@@ -398,397 +518,16 @@ def calcular_biomasa_sentinel(ndvi, tipo_pastura):
     
     return max(0, min(params['MS_POR_HA_OPTIMO'], biomasa_ajustada))
 
-def calcular_metricas_ganaderas(gdf_analizado, tipo_pastura, peso_promedio, carga_animal):
-    """Calcula métricas ganaderas"""
-    params = obtener_parametros_forrajeros(tipo_pastura)
-    metricas = []
-    
-    for idx, row in gdf_analizado.iterrows():
-        biomasa_disponible = row['biomasa_disponible_kg_ms_ha']
-        area_ha = row['area_ha']
-        
-        consumo_individual_kg = peso_promedio * params['CONSUMO_PORCENTAJE_PESO']
-        biomasa_total = biomasa_disponible * area_ha
-        
-        if biomasa_total > 0 and consumo_individual_kg > 0:
-            ev_soportable = (biomasa_total * params['TASA_UTILIZACION_RECOMENDADA']) / (consumo_individual_kg * 100)
-            ev_soportable = max(0.1, ev_soportable)
-        else:
-            ev_soportable = 0.1
-        
-        if carga_animal > 0 and consumo_individual_kg > 0:
-            consumo_total_diario = carga_animal * consumo_individual_kg
-            if consumo_total_diario > 0:
-                dias_permanencia = biomasa_total / consumo_total_diario
-                dias_permanencia = max(0.1, min(30, dias_permanencia))
-            else:
-                dias_permanencia = 0.1
-        else:
-            dias_permanencia = 0.1
-        
-        ev_ha = ev_soportable / area_ha if area_ha > 0 else 0
-        
-        metricas.append({
-            'ev_soportable': round(ev_soportable, 2),
-            'dias_permanencia': round(dias_permanencia, 1),
-            'biomasa_total_kg': round(biomasa_total, 1),
-            'consumo_individual_kg': round(consumo_individual_kg, 1),
-            'ev_ha': round(ev_ha, 3)
-        })
-    
-    return metricas
-
-# =============================================================================
-# VISUALIZACIÓN CON SENTINEL-2
-# =============================================================================
-
-class SentinelMapVisualizer:
-    """Visualizador con datos reales de Sentinel-2"""
-    
-    def __init__(self):
-        self.sentinel_processor = Sentinel2Processor()
-    
-    def create_sentinel_map(self, gdf, target_date, cloud_filter=20, index_type='NDVI'):
-        """Crea mapa con datos Sentinel-2 reales"""
-        try:
-            if not ee_initialized:
-                return self.create_base_map(gdf)
-            
-            # Convertir a geometría Earth Engine
-            geojson_dict = json.loads(gdf.to_json())
-            geometry = ee.Geometry(geojson_dict['features'][0]['geometry'])
-            
-            # Obtener mejor imagen
-            with st.spinner("🛰️ Descargando imagen Sentinel-2..."):
-                image = self.sentinel_processor.get_best_image(geometry, target_date, cloud_filter)
-            
-            if image is None:
-                st.warning("No se pudo obtener imagen Sentinel-2")
-                return self.create_base_map(gdf)
-            
-            # Configuración de visualización
-            vis_params = {
-                'NDVI': {'min': -1, 'max': 1, 'palette': ['red', 'yellow', 'green']},
-                'EVI': {'min': -1, 'max': 1, 'palette': ['red', 'yellow', 'green']},
-                'SAVI': {'min': -1, 'max': 1, 'palette': ['red', 'yellow', 'green']},
-                'BSI': {'min': -1, 'max': 1, 'palette': ['blue', 'white', 'brown']}
-            }.get(index_type, {'min': -1, 'max': 1, 'palette': ['red', 'yellow', 'green']})
-            
-            # Crear mapa con geemap
-            Map = geemap.Map(
-                center=[gdf.geometry.centroid.iloc[0].y, gdf.geometry.centroid.iloc[0].x], 
-                zoom=13
-            )
-            
-            # Añadir capas
-            Map.add_basemap('SATELLITE')
-            Map.addLayer(image.select(index_type), vis_params, f'Sentinel-2 {index_type}')
-            Map.add_gdf(gdf, layer_name="Sub-Lotes", style={'color': 'red', 'weight': 3, 'fillOpacity': 0})
-            Map.add_layer_control()
-            
-            return Map
-            
-        except Exception as e:
-            st.error(f"Error creando mapa Sentinel: {e}")
-            return self.create_base_map(gdf)
-    
-    def create_base_map(self, gdf, map_type="google_satellite"):
-        """Crea mapa base"""
-        try:
-            centroid = gdf.geometry.centroid.iloc[0]
-            bounds = gdf.total_bounds
-            
-            m = folium.Map(
-                location=[centroid.y, centroid.x],
-                zoom_start=13,
-                control_scale=True
-            )
-            
-            if map_type == "google_satellite":
-                folium.TileLayer(
-                    tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
-                    attr='Google Satellite',
-                    name='Google Satellite',
-                    overlay=False
-                ).add_to(m)
-            
-            folium.TileLayer(
-                tiles='OpenStreetMap',
-                name='OpenStreetMap',
-                overlay=False
-            ).add_to(m)
-            
-            self._add_polygons_to_map(m, gdf)
-            m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
-            folium.LayerControl().add_to(m)
-            
-            return m
-            
-        except Exception as e:
-            st.error(f"Error creando mapa base: {e}")
-            return None
-    
-    def _add_polygons_to_map(self, m, gdf):
-        """Añade polígonos al mapa"""
-        try:
-            for idx, row in gdf.iterrows():
-                if 'ndvi' in gdf.columns and pd.notna(row['ndvi']):
-                    ndvi = row['ndvi']
-                    if ndvi < 0.2:
-                        color = '#d73027'
-                    elif ndvi < 0.4:
-                        color = '#fdae61'
-                    elif ndvi < 0.6:
-                        color = '#a6d96a'
-                    else:
-                        color = '#1a9850'
-                else:
-                    color = '#3388ff'
-                
-                tooltip_text = f"Sub-lote: {row.get('id_subLote', idx+1)}"
-                if 'area_ha' in gdf.columns:
-                    tooltip_text += f"<br>Área: {row['area_ha']:.2f} ha"
-                if 'ndvi' in gdf.columns and pd.notna(row['ndvi']):
-                    tooltip_text += f"<br>NDVI: {row['ndvi']:.3f}"
-                
-                folium.GeoJson(
-                    row.geometry.__geo_interface__,
-                    style_function=lambda x, color=color: {
-                        'fillColor': color,
-                        'color': '#000000',
-                        'weight': 2,
-                        'fillOpacity': 0.6
-                    },
-                    tooltip=folium.Tooltip(tooltip_text)
-                ).add_to(m)
-                
-        except Exception as e:
-            st.error(f"Error añadiendo polígonos: {e}")
-    
-    def create_ndvi_map(self, gdf_analizado, tipo_pastura):
-        """Crea mapa temático de NDVI"""
-        try:
-            fig, ax = plt.subplots(1, 1, figsize=(15, 10))
-            cmap = LinearSegmentedColormap.from_list('ndvi_cmap', ['#d73027', '#fee08b', '#a6d96a', '#1a9850'])
-            
-            for idx, row in gdf_analizado.iterrows():
-                ndvi = row['ndvi']
-                if pd.isna(ndvi):
-                    color = 'lightgray'
-                else:
-                    color = cmap(ndvi)
-                
-                gdf_analizado.iloc[[idx]].plot(
-                    ax=ax,
-                    color=color,
-                    edgecolor='black',
-                    linewidth=1
-                )
-                
-                centroid = row.geometry.centroid
-                label_text = f"S{row['id_subLote']}"
-                if not pd.isna(ndvi):
-                    label_text += f"\n{ndvi:.2f}"
-                
-                ax.annotate(
-                    label_text,
-                    (centroid.x, centroid.y),
-                    xytext=(5, 5),
-                    textcoords="offset points",
-                    fontsize=8,
-                    color='black',
-                    weight='bold',
-                    bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8)
-                )
-            
-            ax.set_title(f'🌿 MAPA DE NDVI - {tipo_pastura} (Sentinel-2)', fontsize=16, fontweight='bold', pad=20)
-            ax.set_xlabel('Longitud')
-            ax.set_ylabel('Latitud')
-            ax.grid(True, alpha=0.3)
-            
-            sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0, vmax=1))
-            sm.set_array([])
-            cbar = plt.colorbar(sm, ax=ax, shrink=0.8)
-            cbar.set_label('NDVI', fontsize=12, fontweight='bold')
-            
-            plt.tight_layout()
-            
-            buf = io.BytesIO()
-            plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
-            buf.seek(0)
-            plt.close()
-            
-            return buf
-            
-        except Exception as e:
-            st.error(f"Error creando mapa NDVI: {e}")
-            return None
-
-# =============================================================================
-# ANÁLISIS CON SENTINEL-2 REAL
-# =============================================================================
-
-def analisis_forrajero_sentinel(gdf, config):
-    """Función principal de análisis con Sentinel-2 real"""
-    try:
-        st.header("🌱 ANÁLISIS FORRAJERO - SENTINEL-2 REAL")
-        
-        # Verificar Earth Engine
-        if not ee_initialized:
-            st.error("""
-            ❌ Earth Engine no configurado
-            
-            **Para usar Sentinel-2 real:**
-            1. Ejecuta: `earthengine authenticate`
-            2. Sigue las instrucciones en el navegador
-            3. Reinicia la aplicación
-            """)
-            return False
-        
-        area_total = calcular_superficie(gdf).sum()
-        st.success(f"✅ Potrero cargado: {area_total:.1f} ha, {len(gdf)} polígonos")
-        
-        # PASO 1: Mostrar mapa Sentinel-2
-        st.subheader("🛰️ MAPA SENTINEL-2 - NDVI")
-        visualizador = SentinelMapVisualizer()
-        
-        with st.spinner("Cargando imagen Sentinel-2..."):
-            mapa_sentinel = visualizador.create_sentinel_map(
-                gdf, 
-                config['fecha_imagen'], 
-                config['nubes_max'],
-                'NDVI'
-            )
-        
-        if isinstance(mapa_sentinel, geemap.Map):
-            mapa_sentinel.to_streamlit(height=500)
-        else:
-            folium_static(mapa_sentinel, width=1000, height=500)
-        
-        # PASO 2: Dividir potrero
-        st.subheader("📐 DIVIDIENDO POTRERO EN SUB-LOTES")
-        with st.spinner("Dividiendo potrero..."):
-            gdf_dividido = dividir_potrero_en_subLotes(gdf, config['n_divisiones'])
-        
-        if gdf_dividido is None or len(gdf_dividido) == 0:
-            st.error("❌ Error: No se pudieron crear sub-lotes")
-            return False
-            
-        st.success(f"✅ Potrero dividido en {len(gdf_dividido)} sub-lotes")
-        
-        # PASO 3: Obtener datos Sentinel-2 para cada sub-lote
-        st.subheader("📊 PROCESANDO DATOS SENTINEL-2")
-        
-        processor = Sentinel2Processor()
-        resultados = []
-        
-        # Convertir geometría principal a EE
-        geojson_dict = json.loads(gdf.to_json())
-        geometry_principal = ee.Geometry(geojson_dict['features'][0]['geometry'])
-        
-        # Obtener imagen una sola vez para toda el área
-        with st.spinner("Obteniendo datos Sentinel-2 para toda el área..."):
-            imagen_completa = processor.get_best_image(
-                geometry_principal, 
-                config['fecha_imagen'], 
-                config['nubes_max']
-            )
-        
-        if imagen_completa is None:
-            st.error("❌ No se pudo obtener imagen Sentinel-2 para el área")
-            return False
-        
-        # Procesar cada sub-lote
-        progress_bar = st.progress(0)
-        for idx, row in gdf_dividido.iterrows():
-            progress = (idx + 1) / len(gdf_dividido)
-            progress_bar.progress(progress)
-            
-            # Convertir sub-geometría a EE
-            sub_geojson = json.loads(gpd.GeoSeries([row.geometry]).to_json())
-            sub_geometry = ee.Geometry(sub_geojson['features'][0]['geometry'])
-            
-            # Extraer valores para el sub-lote
-            valores = processor.extract_values_for_geometry(imagen_completa, sub_geometry)
-            
-            if valores:
-                ndvi = valores.get('NDVI')
-                evi = valores.get('EVI')
-                savi = valores.get('SAVI')
-                bsi = valores.get('BSI')
-            else:
-                ndvi = evi = savi = bsi = None
-            
-            # Calcular métricas
-            biomasa_total = calcular_biomasa_sentinel(ndvi, config['tipo_pastura'])
-            biomasa_disponible = biomasa_total * 0.6  # 60% de aprovechamiento
-            tipo_vegetacion = clasificar_vegetacion_sentinel(ndvi, evi, savi, bsi)
-            
-            # Calcular área
-            area_ha = calcular_superficie(gpd.GeoDataFrame([row], crs=gdf_dividido.crs))
-            if hasattr(area_ha, 'iloc'):
-                area_ha = area_ha.iloc[0]
-            elif hasattr(area_ha, '__getitem__'):
-                area_ha = area_ha[0]
-            
-            resultados.append({
-                'id_subLote': row['id_subLote'],
-                'area_ha': area_ha,
-                'ndvi': ndvi,
-                'evi': evi,
-                'savi': savi,
-                'bsi': bsi,
-                'tipo_superficie': tipo_vegetacion,
-                'biomasa_total_kg_ms_ha': biomasa_total,
-                'biomasa_disponible_kg_ms_ha': biomasa_disponible,
-                'crecimiento_diario': obtener_parametros_forrajeros(config['tipo_pastura'])['CRECIMIENTO_DIARIO'],
-                'fuente_datos': 'SENTINEL-2'
-            })
-        
-        progress_bar.empty()
-        
-        # Crear GeoDataFrame con resultados
-        gdf_analizado = gdf_dividido.copy()
-        for col in ['area_ha', 'ndvi', 'evi', 'savi', 'bsi', 'tipo_superficie', 
-                   'biomasa_total_kg_ms_ha', 'biomasa_disponible_kg_ms_ha', 'crecimiento_diario', 'fuente_datos']:
-            gdf_analizado[col] = [r[col] for r in resultados]
-        
-        # PASO 4: Calcular métricas ganaderas
-        st.subheader("🐄 CALCULANDO MÉTRICAS GANADERAS")
-        with st.spinner("Calculando equivalentes vaca..."):
-            metricas = calcular_metricas_ganaderas(
-                gdf_analizado, 
-                config['tipo_pastura'], 
-                config['peso_promedio'], 
-                config['carga_animal']
-            )
-        
-        for col in ['ev_soportable', 'dias_permanencia', 'biomasa_total_kg', 'consumo_individual_kg', 'ev_ha']:
-            gdf_analizado[col] = [m[col] for m in metricas]
-        
-        # PASO 5: Mostrar resultados
-        mostrar_resultados_sentinel(gdf_analizado, config)
-        
-        st.session_state.analisis_completado = True
-        return True
-        
-    except Exception as e:
-        st.error(f"❌ Error en análisis: {str(e)}")
-        import traceback
-        st.error(f"Detalle: {traceback.format_exc()}")
-        return False
-
 def mostrar_resultados_sentinel(gdf_analizado, config):
     """Muestra resultados con datos Sentinel-2"""
     st.header("📊 RESULTADOS - SENTINEL-2 REAL")
     
-    # Información de la imagen
-    st.subheader("🛰️ INFORMACIÓN DE LA IMAGEN")
+    # Métricas principales
+    st.subheader("📈 MÉTRICAS PRINCIPALES")
     
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        # Contar sub-lotes con datos válidos
         ndvi_validos = gdf_analizado['ndvi'].notna().sum()
         total_sub_lotes = len(gdf_analizado)
         st.metric("Sub-lotes con datos", f"{ndvi_validos}/{total_sub_lotes}")
@@ -805,26 +544,12 @@ def mostrar_resultados_sentinel(gdf_analizado, config):
         area_total = gdf_analizado['area_ha'].sum()
         st.metric("Área Total", f"{area_total:.1f} ha")
     
-    # Mapa de NDVI
-    st.subheader("🟢 MAPA DE NDVI - SENTINEL-2")
-    visualizador = SentinelMapVisualizer()
-    mapa_ndvi = visualizador.create_ndvi_map(gdf_analizado, config['tipo_pastura'])
-    if mapa_ndvi:
-        st.image(mapa_ndvi, use_container_width=True)
-        
-        st.download_button(
-            "📥 Descargar Mapa NDVI",
-            mapa_ndvi.getvalue(),
-            f"mapa_ndvi_sentinel2_{config['tipo_pastura']}_{datetime.now().strftime('%Y%m%d_%H%M')}.png",
-            "image/png"
-        )
-    
     # Tabla de resultados
     st.subheader("📋 DETALLES POR SUB-LOTE")
     
     columnas_detalle = [
         'id_subLote', 'area_ha', 'tipo_superficie', 'ndvi', 
-        'biomasa_disponible_kg_ms_ha', 'ev_soportable', 'dias_permanencia', 'fuente_datos'
+        'biomasa_disponible_kg_ms_ha', 'fuente_datos'
     ]
     
     columnas_existentes = [col for col in columnas_detalle if col in gdf_analizado.columns]
@@ -836,35 +561,12 @@ def mostrar_resultados_sentinel(gdf_analizado, config):
         'tipo_superficie': 'Tipo Superficie',
         'ndvi': 'NDVI',
         'biomasa_disponible_kg_ms_ha': 'Biomasa Disp (kg MS/ha)',
-        'ev_soportable': 'EV',
-        'dias_permanencia': 'Días Permanencia',
         'fuente_datos': 'Fuente'
     }
     
     tabla_detalle.columns = [nombres_amigables.get(col, col) for col in columnas_existentes]
     
     st.dataframe(tabla_detalle, use_container_width=True)
-    
-    # Estadísticas
-    with st.expander("📊 ESTADÍSTICAS DETALLADAS"):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.write("**Distribución de vegetación:**")
-            distribucion = gdf_analizado['tipo_superficie'].value_counts()
-            for tipo, count in distribucion.items():
-                porcentaje = (count / len(gdf_analizado)) * 100
-                st.write(f"- {tipo}: {count} sub-lotes ({porcentaje:.1f}%)")
-        
-        with col2:
-            st.write("**Rangos de NDVI:**")
-            ndvi_vals = gdf_analizado['ndvi'].dropna()
-            if len(ndvi_vals) > 0:
-                st.write(f"- Mínimo: {ndvi_vals.min():.3f}")
-                st.write(f"- Máximo: {ndvi_vals.max():.3f}")
-                st.write(f"- Promedio: {ndvi_vals.mean():.3f}")
-            else:
-                st.write("- No hay datos NDVI disponibles")
     
     # Descarga de resultados
     st.subheader("💾 EXPORTAR RESULTADOS")
@@ -878,7 +580,7 @@ def mostrar_resultados_sentinel(gdf_analizado, config):
     )
 
 # =============================================================================
-# SIDEBAR
+# SIDEBAR MEJORADO
 # =============================================================================
 
 with st.sidebar:
@@ -896,12 +598,6 @@ with st.sidebar:
         st.error("❌ Earth Engine: NO INSTALADO")
     
     st.subheader("🛰️ Parámetros Sentinel-2")
-    fuente_satelital = st.selectbox(
-        "Fuente de datos:",
-        ["SENTINEL-2", "SIMULADO"],
-        disabled=not ee_initialized
-    )
-    
     fecha_imagen = st.date_input(
         "Fecha de imagen:",
         value=datetime.now() - timedelta(days=30),
@@ -915,10 +611,6 @@ with st.sidebar:
         "Seleccionar tipo:",
         ["ALFALFA", "RAYGRASS", "FESTUCA", "AGROPIRRO", "PASTIZAL_NATURAL"]
     )
-    
-    st.subheader("🐄 Parámetros Ganaderos")
-    peso_promedio = st.slider("Peso promedio (kg):", 300, 600, 450)
-    carga_animal = st.slider("Carga animal:", 50, 1000, 100)
     
     st.subheader("📐 División del Potrero")
     n_divisiones = st.slider("Número de sub-lotes:", 8, 32, 16)
@@ -974,7 +666,7 @@ def main():
         with col3:
             st.metric("Pastura", tipo_pastura)
         with col4:
-            st.metric("Fuente", fuente_satelital)
+            st.metric("Fuente", "SENTINEL-2" if ee_initialized else "NO DISPONIBLE")
         
         # Botón de análisis
         st.markdown("---")
@@ -985,63 +677,53 @@ def main():
                 'fecha_imagen': fecha_imagen,
                 'nubes_max': nubes_max,
                 'tipo_pastura': tipo_pastura,
-                'peso_promedio': peso_promedio,
-                'carga_animal': carga_animal,
                 'n_divisiones': n_divisiones
             }
             
-            if fuente_satelital == "SENTINEL-2" and ee_initialized:
+            if ee_initialized:
                 with st.spinner("Analizando con Sentinel-2 real..."):
                     resultado = analisis_forrajero_sentinel(gdf, config)
+                
+                if resultado:
+                    st.balloons()
+                    st.success("🎉 ¡Análisis completado con Sentinel-2!")
             else:
-                st.warning("⚠️ Usando datos simulados (Earth Engine no disponible)")
-                # Aquí iría la función de análisis simulado si la quisieras mantener
-            
-            if resultado:
-                st.balloons()
-                st.success("🎉 ¡Análisis completado con Sentinel-2!")
+                st.error("❌ Earth Engine no está configurado")
     
     else:
         # Pantalla de bienvenida
         st.header("🌱 ANALIZADOR FORRAJERO - SENTINEL-2")
         
-        st.markdown("""
-        ### 🛰️ CARACTERÍSTICAS:
-        
-        ✅ **Datos reales** de Sentinel-2 Harmonized (10m)  
-        ✅ **Índices de vegetación** en tiempo real  
-        ✅ **Mapas interactivos** con Google Satellite  
-        ✅ **Análisis forrajero** preciso  
-        ✅ **Equivalentes vaca** y días de permanencia  
-        
-        ### 📋 REQUISITOS:
-        
-        1. **Cuenta de Google Earth Engine** aprobada
-        2. **Autenticación** con `earthengine authenticate`
-        3. **Shapefile** del potrero en formato ZIP
-        
-        ### 🚀 INSTRUCCIONES:
-        
-        1. Configura Earth Engine (ver sidebar ←)
-        2. Sube tu shapefile
-        3. Configura los parámetros
-        4. Ejecuta el análisis con Sentinel-2 real
-        """)
-        
         if not ee_initialized:
             st.error("""
-            **❌ EARTH ENGINE NO CONFIGURADO**
+            **❌ CONFIGURACIÓN REQUERIDA**
             
-            Para usar Sentinel-2 real necesitas:
+            Para usar **Sentinel-2 real** necesitas:
             
-            1. **Ejecutar en terminal:**
+            1. **Abrir terminal en Codespaces**
+            2. **Ejecutar:** 
             ```bash
             earthengine authenticate
             ```
+            3. **Seguir las instrucciones** (usar cuenta: ee-mawucano25)
+            4. **Reiniciar la aplicación**
             
-            2. **Seguir las instrucciones en el navegador**
+            **📍 Tu cuenta:** ee-mawucano25@gmail.com
+            """)
+        else:
+            st.success("""
+            **✅ TODO LISTO PARA SENTINEL-2**
             
-            3. **Reiniciar esta aplicación**
+            **🛰️ Características:**
+            - Imágenes reales Sentinel-2 Harmonized (10m)
+            - NDVI, EVI, SAVI en tiempo real
+            - Filtro automático de nubes
+            - Análisis forrajero preciso
+            
+            **🚀 Para comenzar:**
+            1. Sube tu shapefile en formato ZIP
+            2. Configura los parámetros en el sidebar
+            3. Ejecuta el análisis con Sentinel-2
             """)
 
 if __name__ == "__main__":
