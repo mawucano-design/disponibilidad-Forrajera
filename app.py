@@ -13,399 +13,41 @@ import io
 from shapely.geometry import Polygon, Point
 import math
 import requests
-import rasterio
-from rasterio.mask import mask
 import json
 import folium
-from streamlit_folium import folium_static, st_folium
-import ee
-import geemap
-from geemap import foliumap
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+from streamlit_folium import folium_static
 import warnings
 warnings.filterwarnings('ignore')
 
 # =============================================================================
-# CONFIGURACIÓN INICIAL Y AUTENTICACIÓN
+# CONFIGURACIÓN INICIAL
 # =============================================================================
 
 # Configurar página de Streamlit
 st.set_page_config(
-    page_title="🌱 Analizador Forrajero GEE",
+    page_title="🌱 Analizador Forrajero GitHub",
     page_icon="🌱",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # Título principal
-st.title("🌱 ANALIZADOR FORRAJERO - SENTINEL-2 & GOOGLE SATELLITE")
+st.title("🌱 ANALIZADOR FORRAJERO - MODO GITHUB")
 st.markdown("---")
 
 # Configuración para shapefiles
 os.environ['SHAPE_RESTORE_SHX'] = 'YES'
 
-# Intentar inicializar Earth Engine
-def initialize_earth_engine():
-    """Inicializa Earth Engine con manejo de errores"""
-    try:
-        # Para uso local, necesitarás autenticarte
-        # ee.Authenticate()  # Descomenta la primera vez
-        ee.Initialize(project='ee-forrajes')
-        return True
-    except Exception as e:
-        st.warning(f"""
-        ⚠️ Earth Engine no está inicializado. Algunas funciones estarán limitadas.
-        
-        **Para habilitar todas las funciones:**
-        1. Ejecuta `ee.Authenticate()` en tu entorno
-        2. Asegúrate de tener una cuenta de Google Earth Engine
-        3. Solicita acceso a https://earthengine.google.com/
-        
-        Error: {str(e)}
-        """)
-        return False
-
-# Inicializar Earth Engine
-ee_initialized = initialize_earth_engine()
+# Inicializar variables de session state
+if 'gdf_cargado' not in st.session_state:
+    st.session_state.gdf_cargado = None
+if 'analisis_completado' not in st.session_state:
+    st.session_state.analisis_completado = False
 
 # =============================================================================
-# CLASES PARA PROCESAMIENTO SATELITAL
+# PARÁMETROS FORRAJEROS
 # =============================================================================
 
-class Sentinel2Processor:
-    """Procesador de imágenes Sentinel-2 harmonizadas"""
-    
-    def __init__(self):
-        self.scale = 10  # Resolución 10m
-        self.bands = ['B2', 'B3', 'B4', 'B8', 'B11', 'B12']  # Bandas principales
-        
-    def get_sentinel2_collection(self, geometry, start_date, end_date, cloud_filter=20):
-        """Obtiene colección Sentinel-2 harmonizada filtrada"""
-        try:
-            if not ee_initialized:
-                return None
-                
-            # Colección Sentinel-2 harmonizada
-            collection = (ee.ImageCollection('COPERNICUS/S2_HARMONIZED')
-                         .filterBounds(geometry)
-                         .filterDate(start_date, end_date)
-                         .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', cloud_filter))
-                         .select(self.bands))
-            
-            return collection
-        except Exception as e:
-            st.error(f"Error obteniendo colección Sentinel-2: {e}")
-            return None
-    
-    def calculate_vegetation_indices(self, image):
-        """Calcula todos los índices de vegetación para una imagen"""
-        try:
-            # NDVI
-            ndvi = image.normalizedDifference(['B8', 'B4']).rename('NDVI')
-            
-            # EVI
-            evi = image.expression(
-                '2.5 * ((NIR - RED) / (NIR + 6 * RED - 7.5 * BLUE + 1))',
-                {
-                    'NIR': image.select('B8'),
-                    'RED': image.select('B4'),
-                    'BLUE': image.select('B2')
-                }
-            ).rename('EVI')
-            
-            # SAVI
-            savi = image.expression(
-                '1.5 * ((NIR - RED) / (NIR + RED + 0.5))',
-                {
-                    'NIR': image.select('B8'),
-                    'RED': image.select('B4')
-                }
-            ).rename('SAVI')
-            
-            # MSAVI2
-            msavi2 = image.expression(
-                '(2 * NIR + 1 - sqrt(pow((2 * NIR + 1), 2) - 8 * (NIR - RED))) / 2',
-                {
-                    'NIR': image.select('B8'),
-                    'RED': image.select('B4')
-                }
-            ).rename('MSAVI2')
-            
-            # BSI - Bare Soil Index
-            bsi = image.expression(
-                '((RED + SWIR1) - (NIR + BLUE)) / ((RED + SWIR1) + (NIR + BLUE))',
-                {
-                    'BLUE': image.select('B2'),
-                    'RED': image.select('B4'),
-                    'NIR': image.select('B8'),
-                    'SWIR1': image.select('B11')
-                }
-            ).rename('BSI')
-            
-            # NDBI - Built-Up Index
-            ndbi = image.normalizedDifference(['B11', 'B8']).rename('NDBI')
-            
-            # Añadir todas las bandas a la imagen
-            image_with_indices = image.addBands([ndvi, evi, savi, msavi2, bsi, ndbi])
-            
-            return image_with_indices
-            
-        except Exception as e:
-            st.error(f"Error calculando índices: {e}")
-            return image
-    
-    def get_best_image(self, geometry, target_date, days_buffer=30, cloud_filter=20):
-        """Obtiene la mejor imagen alrededor de la fecha objetivo"""
-        try:
-            if not ee_initialized:
-                return None
-                
-            start_date = ee.Date(target_date).advance(-days_buffer, 'day')
-            end_date = ee.Date(target_date).advance(days_buffer, 'day')
-            
-            collection = self.get_sentinel2_collection(geometry, start_date, end_date, cloud_filter)
-            
-            if collection is None:
-                return None
-                
-            # Ordenar por nubosidad y proximidad a fecha objetivo
-            def add_date_difference(img):
-                date_diff = ee.Number(img.date().difference(ee.Date(target_date), 'day')).abs()
-                return img.set('date_difference', date_diff)
-            
-            collection = collection.map(add_date_difference)
-            collection = collection.sort('date_difference').sort('CLOUDY_PIXEL_PERCENTAGE')
-            
-            best_image = collection.first()
-            
-            # Calcular índices de vegetación
-            best_image = self.calculate_vegetation_indices(best_image)
-            
-            return best_image
-            
-        except Exception as e:
-            st.error(f"Error obteniendo mejor imagen: {e}")
-            return None
-    
-    def extract_values_for_geometry(self, image, geometry, scale=10):
-        """Extrae valores de píxeles para una geometría dada"""
-        try:
-            if not ee_initialized or image is None:
-                return None
-                
-            # Reducir región para obtener estadísticas
-            stats = image.reduceRegion(
-                reducer=ee.Reducer.mean(),
-                geometry=geometry,
-                scale=scale,
-                maxPixels=1e9
-            )
-            
-            # Obtener valores
-            values = stats.getInfo()
-            
-            return values
-            
-        except Exception as e:
-            st.error(f"Error extrayendo valores: {e}")
-            return None
-
-class MapVisualizer:
-    """Clase para visualización de mapas interactivos"""
-    
-    def __init__(self):
-        self.sentinel_processor = Sentinel2Processor()
-        
-    def create_base_map(self, gdf, map_type="google_satellite", zoom_start=13):
-        """Crea mapa base con diferentes opciones"""
-        try:
-            # Calcular centro y bounds
-            centroid = gdf.geometry.centroid.iloc[0]
-            bounds = gdf.total_bounds
-            
-            # Crear mapa centrado
-            m = folium.Map(
-                location=[centroid.y, centroid.x],
-                zoom_start=zoom_start,
-                control_scale=True
-            )
-            
-            # Añadir capas base según selección
-            if map_type == "google_satellite":
-                folium.TileLayer(
-                    tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
-                    attr='Google Satellite',
-                    name='Google Satellite',
-                    overlay=False,
-                    control=True
-                ).add_to(m)
-                
-                # Añadir capa de etiquetas
-                folium.TileLayer(
-                    tiles='https://mt1.google.com/vt/lyrs=h&x={x}&y={y}&z={z}',
-                    attr='Google Labels',
-                    name='Google Labels',
-                    overlay=True,
-                    control=True
-                ).add_to(m)
-                
-            elif map_type == "world_imagery":
-                folium.TileLayer(
-                    tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-                    attr='Esri World Imagery',
-                    name='World Imagery',
-                    overlay=False,
-                    control=True
-                ).add_to(m)
-                
-            elif map_type == "topographic":
-                folium.TileLayer(
-                    tiles='https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
-                    attr='OpenTopoMap',
-                    name='Topographic',
-                    overlay=False,
-                    control=True
-                ).add_to(m)
-            
-            # Añadir capa por defecto
-            folium.TileLayer(
-                tiles='OpenStreetMap',
-                name='OpenStreetMap',
-                overlay=False,
-                control=True
-            ).add_to(m)
-            
-            # Añadir polígonos al mapa
-            self._add_polygons_to_map(m, gdf)
-            
-            # Ajustar vista al bounds
-            m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
-            
-            # Añadir control de capas
-            folium.LayerControl().add_to(m)
-            
-            return m
-            
-        except Exception as e:
-            st.error(f"Error creando mapa base: {e}")
-            return None
-    
-    def _add_polygons_to_map(self, m, gdf):
-        """Añade polígonos al mapa con estilo y tooltips"""
-        try:
-            # Definir colores según tipo de dato disponible
-            if 'tipo_superficie' in gdf.columns:
-                color_map = {
-                    'SUELO_DESNUDO': '#d73027',
-                    'SUELO_PARCIAL': '#fdae61', 
-                    'VEGETACION_ESCASA': '#fee08b',
-                    'VEGETACION_MODERADA': '#a6d96a',
-                    'VEGETACION_DENSA': '#1a9850'
-                }
-            else:
-                color_map = {'default': '#3388ff'}
-            
-            # Función de estilo
-            def style_function(feature):
-                if 'tipo_superficie' in feature['properties']:
-                    color = color_map.get(feature['properties']['tipo_superficie'], '#3388ff')
-                else:
-                    color = '#3388ff'
-                    
-                return {
-                    'fillColor': color,
-                    'color': '#000000',
-                    'weight': 2,
-                    'fillOpacity': 0.6
-                }
-            
-            # Función de tooltip
-            def highlight_function(feature):
-                return {
-                    'fillColor': '#ffff00',
-                    'color': '#000000',
-                    'weight': 3,
-                    'fillOpacity': 0.7
-                }
-            
-            # Añadir GeoJSON
-            geojson = folium.GeoJson(
-                gdf.__geo_interface__,
-                style_function=style_function,
-                highlight_function=highlight_function,
-                tooltip=folium.GeoJsonTooltip(
-                    fields=[col for col in gdf.columns if col != 'geometry'],
-                    aliases=[col.upper() for col in gdf.columns if col != 'geometry'],
-                    localize=True,
-                    sticky=False
-                )
-            ).add_to(m)
-            
-        except Exception as e:
-            st.error(f"Error añadiendo polígonos al mapa: {e}")
-    
-    def create_sentinel_map(self, gdf, target_date, cloud_filter=20, index_type='NDVI'):
-        """Crea mapa con datos Sentinel-2 superpuestos"""
-        try:
-            if not ee_initialized:
-                st.warning("Earth Engine no disponible. Usando mapa base.")
-                return self.create_base_map(gdf, "google_satellite")
-            
-            # Convertir a geometría Earth Engine
-            geojson_dict = json.loads(gdf.to_json())
-            geometry = ee.Geometry(geojson_dict['features'][0]['geometry'])
-            
-            # Obtener mejor imagen
-            with st.spinner("🛰️ Obteniendo imagen Sentinel-2..."):
-                image = self.sentinel_processor.get_best_image(geometry, target_date, cloud_filter)
-            
-            if image is None:
-                st.warning("No se pudo obtener imagen Sentinel-2. Usando mapa base.")
-                return self.create_base_map(gdf, "google_satellite")
-            
-            # Configuración de visualización según índice
-            vis_params = self._get_visualization_params(index_type)
-            
-            # Crear mapa con geemap
-            Map = geemap.Map(center=[gdf.geometry.centroid.iloc[0].y, gdf.geometry.centroid.iloc[0].x], zoom=13)
-            
-            # Añadir capa base
-            Map.add_basemap('SATELLITE')
-            
-            # Añadir capa Sentinel-2
-            Map.addLayer(image.select(index_type), vis_params, f'Sentinel-2 {index_type}')
-            
-            # Añadir polígonos
-            Map.add_gdf(gdf, layer_name="Sub-Lotes", style={'color': 'red', 'weight': 3, 'fillOpacity': 0})
-            
-            # Añadir control de capas
-            Map.add_layer_control()
-            
-            return Map
-            
-        except Exception as e:
-            st.error(f"Error creando mapa Sentinel: {e}")
-            return self.create_base_map(gdf, "google_satellite")
-    
-    def _get_visualization_params(self, index_type):
-        """Obtiene parámetros de visualización para cada índice"""
-        vis_params = {
-            'NDVI': {'min': -1, 'max': 1, 'palette': ['red', 'yellow', 'green']},
-            'EVI': {'min': -1, 'max': 1, 'palette': ['red', 'yellow', 'green']},
-            'SAVI': {'min': -1, 'max': 1, 'palette': ['red', 'yellow', 'green']},
-            'MSAVI2': {'min': -1, 'max': 1, 'palette': ['red', 'yellow', 'green']},
-            'BSI': {'min': -1, 'max': 1, 'palette': ['blue', 'white', 'brown']},
-            'NDBI': {'min': -1, 'max': 1, 'palette': ['blue', 'cyan', 'purple']}
-        }
-        return vis_params.get(index_type, {'min': -1, 'max': 1, 'palette': ['red', 'yellow', 'green']})
-
-# =============================================================================
-# CONFIGURACIÓN DE PARÁMETROS FORRAJEROS
-# =============================================================================
-
-# Parámetros forrajeros (mantener tu código existente)
 PARAMETROS_FORRAJEROS_BASE = {
     'ALFALFA': {
         'MS_POR_HA_OPTIMO': 4000,
@@ -415,14 +57,8 @@ PARAMETROS_FORRAJEROS_BASE = {
         'PROTEINA_CRUDA': 0.18,
         'TASA_UTILIZACION_RECOMENDADA': 0.65,
         'FACTOR_BIOMASA_NDVI': 2800,
-        'FACTOR_BIOMASA_EVI': 3000,
-        'FACTOR_BIOMASA_SAVI': 2900,
-        'OFFSET_BIOMASA': -600,
         'UMBRAL_NDVI_SUELO': 0.15,
-        'UMBRAL_NDVI_PASTURA': 0.45,
-        'UMBRAL_BSI_SUELO': 0.4,
-        'UMBRAL_NDBI_SUELO': 0.15,
-        'FACTOR_COBERTURA': 0.8
+        'UMBRAL_NDVI_PASTURA': 0.45
     },
     'RAYGRASS': {
         'MS_POR_HA_OPTIMO': 3500,
@@ -432,14 +68,8 @@ PARAMETROS_FORRAJEROS_BASE = {
         'PROTEINA_CRUDA': 0.15,
         'TASA_UTILIZACION_RECOMENDADA': 0.60,
         'FACTOR_BIOMASA_NDVI': 2500,
-        'FACTOR_BIOMASA_EVI': 2700,
-        'FACTOR_BIOMASA_SAVI': 2600,
-        'OFFSET_BIOMASA': -500,
         'UMBRAL_NDVI_SUELO': 0.18,
-        'UMBRAL_NDVI_PASTURA': 0.50,
-        'UMBRAL_BSI_SUELO': 0.35,
-        'UMBRAL_NDBI_SUELO': 0.12,
-        'FACTOR_COBERTURA': 0.85
+        'UMBRAL_NDVI_PASTURA': 0.50
     },
     'FESTUCA': {
         'MS_POR_HA_OPTIMO': 3000,
@@ -449,14 +79,8 @@ PARAMETROS_FORRAJEROS_BASE = {
         'PROTEINA_CRUDA': 0.12,
         'TASA_UTILIZACION_RECOMENDADA': 0.55,
         'FACTOR_BIOMASA_NDVI': 2200,
-        'FACTOR_BIOMASA_EVI': 2400,
-        'FACTOR_BIOMASA_SAVI': 2300,
-        'OFFSET_BIOMASA': -400,
         'UMBRAL_NDVI_SUELO': 0.20,
-        'UMBRAL_NDVI_PASTURA': 0.55,
-        'UMBRAL_BSI_SUELO': 0.30,
-        'UMBRAL_NDBI_SUELO': 0.10,
-        'FACTOR_COBERTURA': 0.75
+        'UMBRAL_NDVI_PASTURA': 0.55
     },
     'AGROPIRRO': {
         'MS_POR_HA_OPTIMO': 2800,
@@ -466,14 +90,8 @@ PARAMETROS_FORRAJEROS_BASE = {
         'PROTEINA_CRUDA': 0.10,
         'TASA_UTILIZACION_RECOMENDADA': 0.50,
         'FACTOR_BIOMASA_NDVI': 2000,
-        'FACTOR_BIOMASA_EVI': 2200,
-        'FACTOR_BIOMASA_SAVI': 2100,
-        'OFFSET_BIOMASA': -300,
         'UMBRAL_NDVI_SUELO': 0.25,
-        'UMBRAL_NDVI_PASTURA': 0.60,
-        'UMBRAL_BSI_SUELO': 0.25,
-        'UMBRAL_NDBI_SUELO': 0.08,
-        'FACTOR_COBERTURA': 0.70
+        'UMBRAL_NDVI_PASTURA': 0.60
     },
     'PASTIZAL_NATURAL': {
         'MS_POR_HA_OPTIMO': 2500,
@@ -483,41 +101,29 @@ PARAMETROS_FORRAJEROS_BASE = {
         'PROTEINA_CRUDA': 0.08,
         'TASA_UTILIZACION_RECOMENDADA': 0.45,
         'FACTOR_BIOMASA_NDVI': 1800,
-        'FACTOR_BIOMASA_EVI': 2000,
-        'FACTOR_BIOMASA_SAVI': 1900,
-        'OFFSET_BIOMASA': -200,
         'UMBRAL_NDVI_SUELO': 0.30,
-        'UMBRAL_NDVI_PASTURA': 0.65,
-        'UMBRAL_BSI_SUELO': 0.20,
-        'UMBRAL_NDBI_SUELO': 0.05,
-        'FACTOR_COBERTURA': 0.60
+        'UMBRAL_NDVI_PASTURA': 0.65
     }
 }
 
-def obtener_parametros_forrajeros(tipo_pastura, custom_params=None):
+def obtener_parametros_forrajeros(tipo_pastura):
     """Obtiene parámetros según tipo de pastura"""
-    if tipo_pastura == "PERSONALIZADO" and custom_params:
-        return custom_params
-    else:
-        return PARAMETROS_FORRAJEROS_BASE.get(tipo_pastura, PARAMETROS_FORRAJEROS_BASE['FESTUCA'])
+    return PARAMETROS_FORRAJEROS_BASE.get(tipo_pastura, PARAMETROS_FORRAJEROS_BASE['FESTUCA'])
 
 # =============================================================================
-# FUNCIONES DE ANÁLISIS ESPACIAL
+# FUNCIONES BÁSICAS
 # =============================================================================
 
 def calcular_superficie(gdf):
     """Calcula superficie en hectáreas"""
     try:
         if gdf.crs and gdf.crs.is_geographic:
-            # Reproyectar a un CRS proyectado para cálculo de área
             gdf_proj = gdf.to_crs('EPSG:3857')
             area_m2 = gdf_proj.geometry.area
         else:
             area_m2 = gdf.geometry.area
-        
-        return area_m2 / 10000  # Convertir a hectáreas
-    except Exception as e:
-        st.error(f"Error calculando superficie: {e}")
+        return area_m2 / 10000
+    except:
         return gdf.geometry.area / 10000
 
 def dividir_potrero_en_subLotes(gdf, n_zonas):
@@ -573,168 +179,331 @@ def dividir_potrero_en_subLotes(gdf, n_zonas):
         return gdf
 
 # =============================================================================
-# SIDEBAR - CONFIGURACIÓN
+# SIMULACIÓN DE DATOS SATELITALES
 # =============================================================================
 
-# Inicializar session state
-if 'gdf_cargado' not in st.session_state:
-    st.session_state.gdf_cargado = None
-if 'analisis_completo' not in st.session_state:
-    st.session_state.analisis_completo = False
-if 'mapa_actual' not in st.session_state:
-    st.session_state.mapa_actual = None
-
-# Sidebar
-with st.sidebar:
-    st.header("⚙️ Configuración Principal")
+class SimuladorSatelital:
+    """Simula datos satelitales realistas para GitHub"""
     
-    # Selección de fuente satelital
-    st.subheader("🛰️ Fuente de Datos")
-    fuente_satelital = st.selectbox(
-        "Seleccionar satélite:",
-        ["SENTINEL-2", "LANDSAT-8", "LANDSAT-9", "SIMULADO"],
-        help="Sentinel-2: Mayor resolución (10m)"
-    )
+    def __init__(self):
+        self.patrones_vegetacion = {
+            # Patrones basados en casos reales
+            'SUELO_DESNUDO': {'ndvi_range': (0.05, 0.20), 'frecuencia': 0.1},
+            'VEGETACION_ESCASA': {'ndvi_range': (0.20, 0.40), 'frecuencia': 0.3},
+            'VEGETACION_MODERADA': {'ndvi_range': (0.40, 0.60), 'frecuencia': 0.4},
+            'VEGETACION_DENSA': {'ndvi_range': (0.60, 0.85), 'frecuencia': 0.2}
+        }
     
-    # Selección de mapa base
-    st.subheader("🗺️ Mapa Base")
-    mapa_base = st.selectbox(
-        "Tipo de mapa base:",
-        ["google_satellite", "world_imagery", "topographic", "openstreetmap"],
-        format_func=lambda x: x.replace('_', ' ').title(),
-        help="Selecciona la base cartográfica"
-    )
-    
-    # Configuración de fechas
-    st.subheader("📅 Configuración Temporal")
-    fecha_imagen = st.date_input(
-        "Fecha de imagen satelital:",
-        value=datetime.now() - timedelta(days=30),
-        max_value=datetime.now(),
-        help="Selecciona la fecha para la imagen satelital"
-    )
-    
-    nubes_max = st.slider("Máximo % de nubes:", 0, 100, 20)
-    
-    # Tipo de pastura
-    st.subheader("🌿 Tipo de Pastura")
-    tipo_pastura = st.selectbox(
-        "Seleccionar tipo:",
-        ["ALFALFA", "RAYGRASS", "FESTUCA", "AGROPIRRO", "PASTIZAL_NATURAL", "PERSONALIZADO"]
-    )
-    
-    # Parámetros de detección
-    st.subheader("🔍 Parámetros de Detección")
-    umbral_ndvi_minimo = st.slider("Umbral NDVI mínimo:", 0.1, 0.5, 0.3, 0.01)
-    umbral_ndvi_optimo = st.slider("Umbral NDVI óptimo:", 0.5, 0.9, 0.7, 0.01)
-    sensibilidad_suelo = st.slider("Sensibilidad suelo:", 0.1, 1.0, 0.7, 0.1)
-    
-    # Parámetros ganaderos
-    st.subheader("🐄 Parámetros Ganaderos")
-    peso_promedio = st.slider("Peso promedio (kg):", 300, 600, 450)
-    carga_animal = st.slider("Carga animal:", 50, 1000, 100)
-    
-    # División del potrero
-    st.subheader("📐 División del Potrero")
-    n_divisiones = st.slider("Número de sub-lotes:", 12, 32, 24)
-    
-    # Carga de archivos
-    st.subheader("📤 Cargar Datos")
-    uploaded_zip = st.file_uploader(
-        "Subir ZIP con shapefile:",
-        type=['zip'],
-        help="Archivo ZIP que contiene el shapefile del potrero"
-    )
+    def simular_indices_vegetacion(self, id_subLote, centroid, fecha):
+        """Simula índices de vegetación realistas"""
+        try:
+            # Variación basada en posición (para patrones espaciales)
+            x_norm = (centroid.x * 1000) % 100 / 100
+            y_norm = (centroid.y * 1000) % 100 / 100
+            
+            # Variación estacional
+            dia_del_año = fecha.timetuple().tm_yday
+            factor_estacional = 0.3 * math.sin(2 * math.pi * dia_del_año / 365 - math.pi/2) + 0.7
+            
+            # Determinar tipo de vegetación basado en posición
+            valor_base = (x_norm + y_norm) / 2
+            
+            if valor_base < 0.1:
+                tipo = 'SUELO_DESNUDO'
+            elif valor_base < 0.4:
+                tipo = 'VEGETACION_ESCASA'
+            elif valor_base < 0.8:
+                tipo = 'VEGETACION_MODERADA'
+            else:
+                tipo = 'VEGETACION_DENSA'
+            
+            # Generar NDVI según el tipo
+            rango = self.patrones_vegetacion[tipo]['ndvi_range']
+            ndvi_base = rango[0] + (rango[1] - rango[0]) * (x_norm * y_norm)
+            ndvi = ndvi_base * factor_estacional
+            
+            # Añadir variabilidad natural
+            ndvi += np.random.normal(0, 0.05)
+            ndvi = max(0.05, min(0.85, ndvi))
+            
+            # Calcular otros índices de forma consistente
+            evi = ndvi * 1.1 + np.random.normal(0, 0.02)
+            savi = ndvi * 1.05 + np.random.normal(0, 0.02)
+            msavi2 = ndvi * 1.02 + np.random.normal(0, 0.01)
+            
+            # Índices de suelo (inversamente relacionados con vegetación)
+            bsi = 0.3 - (ndvi * 0.4) + np.random.normal(0, 0.05)
+            ndbi = 0.2 - (ndvi * 0.3) + np.random.normal(0, 0.03)
+            
+            return {
+                'ndvi': ndvi,
+                'evi': max(0.1, min(1.0, evi)),
+                'savi': max(0.1, min(1.0, savi)),
+                'msavi2': max(0.1, min(1.0, msavi2)),
+                'bsi': max(-1.0, min(1.0, bsi)),
+                'ndbi': max(-1.0, min(1.0, ndbi)),
+                'tipo_superficie': tipo,
+                'cobertura_vegetal': min(0.95, max(0.05, ndvi * 1.2))
+            }
+            
+        except Exception as e:
+            # Valores por defecto en caso de error
+            return {
+                'ndvi': 0.5,
+                'evi': 0.55,
+                'savi': 0.52,
+                'msavi2': 0.51,
+                'bsi': 0.1,
+                'ndbi': 0.05,
+                'tipo_superficie': 'VEGETACION_MODERADA',
+                'cobertura_vegetal': 0.6
+            }
 
 # =============================================================================
-# PROCESAMIENTO DE ARCHIVOS
+# CÁLCULOS FORRAJEROS
 # =============================================================================
 
-def procesar_archivo_zip(uploaded_zip):
-    """Procesa el archivo ZIP y carga el shapefile"""
-    try:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            with zipfile.ZipFile(uploaded_zip, 'r') as zip_ref:
-                zip_ref.extractall(tmp_dir)
-            
-            # Buscar archivos shapefile
-            shp_files = [f for f in os.listdir(tmp_dir) if f.endswith('.shp')]
-            if not shp_files:
-                st.error("❌ No se encontró archivo .shp en el ZIP")
-                return None
-            
-            shp_path = os.path.join(tmp_dir, shp_files[0])
-            gdf = gpd.read_file(shp_path)
-            
-            # Verificar que tenga geometrías válidas
-            if len(gdf) == 0:
-                st.error("❌ El shapefile no contiene geometrías válidas")
-                return None
-            
-            # Verificar CRS
-            if gdf.crs is None:
-                st.warning("⚠️ El shapefile no tiene CRS definido. Asumiendo WGS84 (EPSG:4326)")
-                gdf = gdf.set_crs('EPSG:4326')
-            
-            return gdf
-            
-    except Exception as e:
-        st.error(f"❌ Error procesando archivo: {str(e)}")
-        return None
+def calcular_biomasa(ndvi, tipo_pastura):
+    """Calcula biomasa basada en NDVI y tipo de pastura"""
+    params = obtener_parametros_forrajeros(tipo_pastura)
+    
+    # Fórmula mejorada de biomasa
+    if ndvi < params['UMBRAL_NDVI_SUELO']:
+        return 0  # Suelo desnudo
+    
+    # Biomasa base según NDVI
+    biomasa_base = params['FACTOR_BIOMASA_NDVI'] * ndvi
+    
+    # Ajustar según tipo de pastura
+    if ndvi < params['UMBRAL_NDVI_PASTURA']:
+        # Vegetación escasa - reducir biomasa
+        factor_ajuste = (ndvi - params['UMBRAL_NDVI_SUELO']) / (params['UMBRAL_NDVI_PASTURA'] - params['UMBRAL_NDVI_SUELO'])
+        biomasa_ajustada = biomasa_base * factor_ajuste * 0.7
+    else:
+        # Vegetación buena - biomasa completa
+        factor_ajuste = min(1.0, (ndvi - params['UMBRAL_NDVI_PASTURA']) / (0.8 - params['UMBRAL_NDVI_PASTURA']))
+        biomasa_ajustada = biomasa_base * (0.7 + 0.3 * factor_ajuste)
+    
+    return max(0, min(params['MS_POR_HA_OPTIMO'], biomasa_ajustada))
 
-# Procesar archivo subido
-if uploaded_zip is not None:
-    with st.spinner("📁 Cargando y procesando shapefile..."):
-        gdf_cargado = procesar_archivo_zip(uploaded_zip)
-        if gdf_cargado is not None:
-            st.session_state.gdf_cargado = gdf_cargado
-            st.success(f"✅ Potrero cargado exitosamente!")
-            
-            # Mostrar información del potrero
-            area_total = calcular_superficie(gdf_cargado).sum()
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Polígonos", len(gdf_cargado))
-            with col2:
-                st.metric("Área Total", f"{area_total:.1f} ha")
-            with col3:
-                st.metric("Pastura", tipo_pastura)
-            with col4:
-                st.metric("Satélite", fuente_satelital)
+def calcular_metricas_ganaderas(gdf_analizado, tipo_pastura, peso_promedio, carga_animal):
+    """Calcula métricas ganaderas"""
+    params = obtener_parametros_forrajeros(tipo_pastura)
+    metricas = []
+    
+    for idx, row in gdf_analizado.iterrows():
+        biomasa_disponible = row['biomasa_disponible_kg_ms_ha']
+        area_ha = row['area_ha']
+        
+        # Consumo individual
+        consumo_individual_kg = peso_promedio * params['CONSUMO_PORCENTAJE_PESO']
+        
+        # Biomasa total disponible
+        biomasa_total = biomasa_disponible * area_ha
+        
+        # Equivalentes vaca
+        if biomasa_total > 0 and consumo_individual_kg > 0:
+            ev_soportable = (biomasa_total * params['TASA_UTILIZACION_RECOMENDADA']) / (consumo_individual_kg * 100)
+            ev_soportable = max(0.1, ev_soportable)
+        else:
+            ev_soportable = 0.1
+        
+        # Días de permanencia
+        if carga_animal > 0 and consumo_individual_kg > 0:
+            consumo_total_diario = carga_animal * consumo_individual_kg
+            if consumo_total_diario > 0:
+                dias_permanencia = biomasa_total / consumo_total_diario
+                dias_permanencia = max(0.1, min(30, dias_permanencia))
+            else:
+                dias_permanencia = 0.1
+        else:
+            dias_permanencia = 0.1
+        
+        # EV por hectárea
+        ev_ha = ev_soportable / area_ha if area_ha > 0 else 0
+        
+        metricas.append({
+            'ev_soportable': round(ev_soportable, 2),
+            'dias_permanencia': round(dias_permanencia, 1),
+            'biomasa_total_kg': round(biomasa_total, 1),
+            'consumo_individual_kg': round(consumo_individual_kg, 1),
+            'ev_ha': round(ev_ha, 3)
+        })
+    
+    return metricas
 
 # =============================================================================
 # VISUALIZACIÓN DE MAPAS
 # =============================================================================
 
-def mostrar_mapa_interactivo(gdf, mapa_tipo, fecha_imagen=None, nubes_max=20, index_type='NDVI'):
-    """Muestra mapa interactivo según la configuración"""
+class VisualizadorMapas:
+    """Clase para crear mapas interactivos"""
     
-    visualizador = MapVisualizer()
+    def __init__(self):
+        self.simulador = SimuladorSatelital()
     
-    if mapa_tipo == "sentinel_ndvi" and fecha_imagen and ee_initialized:
-        with st.spinner("🛰️ Cargando imagen Sentinel-2..."):
-            mapa = visualizador.create_sentinel_map(gdf, fecha_imagen, nubes_max, index_type)
-    else:
-        with st.spinner("🗺️ Cargando mapa base..."):
-            mapa = visualizador.create_base_map(gdf, mapa_tipo)
+    def crear_mapa_base(self, gdf, tipo_mapa="google_satellite"):
+        """Crea mapa base interactivo"""
+        try:
+            # Calcular centro y bounds
+            centroid = gdf.geometry.centroid.iloc[0]
+            bounds = gdf.total_bounds
+            
+            # Crear mapa centrado
+            m = folium.Map(
+                location=[centroid.y, centroid.x],
+                zoom_start=13,
+                control_scale=True
+            )
+            
+            # Añadir capas base
+            if tipo_mapa == "google_satellite":
+                folium.TileLayer(
+                    tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
+                    attr='Google Satellite',
+                    name='Google Satellite',
+                    overlay=False
+                ).add_to(m)
+                
+            elif tipo_mapa == "world_imagery":
+                folium.TileLayer(
+                    tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                    attr='Esri World Imagery',
+                    name='World Imagery',
+                    overlay=False
+                ).add_to(m)
+            
+            # Capa OpenStreetMap por defecto
+            folium.TileLayer(
+                tiles='OpenStreetMap',
+                name='OpenStreetMap',
+                overlay=False
+            ).add_to(m)
+            
+            # Añadir polígonos
+            self._añadir_poligonos_mapa(m, gdf)
+            
+            # Ajustar vista
+            m.fit_bounds([[bounds[1], bounds[0]], [bounds[3], bounds[2]]])
+            
+            # Control de capas
+            folium.LayerControl().add_to(m)
+            
+            return m
+            
+        except Exception as e:
+            st.error(f"Error creando mapa: {e}")
+            return None
     
-    if mapa is not None:
-        # Mostrar mapa
-        if isinstance(mapa, geemap.Map):
-            # Usar geemap para mapas de Earth Engine
-            mapa.to_streamlit(height=600)
-        else:
-            # Usar streamlit-folium para mapas Folium normales
-            folium_static(mapa, width=1000, height=600)
-        
-        st.session_state.mapa_actual = mapa
-        return mapa
-    else:
-        st.error("❌ No se pudo cargar el mapa")
-        return None
+    def _añadir_poligonos_mapa(self, m, gdf):
+        """Añade polígonos al mapa con estilo"""
+        try:
+            for idx, row in gdf.iterrows():
+                # Determinar color basado en datos disponibles
+                if 'ndvi' in gdf.columns:
+                    ndvi = row['ndvi']
+                    if ndvi < 0.2:
+                        color = '#d73027'  # Rojo
+                    elif ndvi < 0.4:
+                        color = '#fdae61'  # Naranja
+                    elif ndvi < 0.6:
+                        color = '#a6d96a'  # Verde claro
+                    else:
+                        color = '#1a9850'  # Verde oscuro
+                else:
+                    color = '#3388ff'  # Azul por defecto
+                
+                # Crear tooltip
+                tooltip_text = f"Sub-lote: {row.get('id_subLote', idx+1)}"
+                if 'area_ha' in gdf.columns:
+                    tooltip_text += f"<br>Área: {row['area_ha']:.2f} ha"
+                if 'ndvi' in gdf.columns:
+                    tooltip_text += f"<br>NDVI: {row['ndvi']:.3f}"
+                
+                # Añadir polígono
+                folium.GeoJson(
+                    row.geometry.__geo_interface__,
+                    style_function=lambda x, color=color: {
+                        'fillColor': color,
+                        'color': '#000000',
+                        'weight': 2,
+                        'fillOpacity': 0.6
+                    },
+                    tooltip=folium.Tooltip(tooltip_text)
+                ).add_to(m)
+                
+                # Añadir número de sub-lote
+                centroid = row.geometry.centroid
+                folium.Marker(
+                    [centroid.y, centroid.x],
+                    icon=folium.DivIcon(
+                        html=f'<div style="font-weight: bold; color: black; background: white; padding: 2px; border-radius: 3px; border: 1px solid black;">{row.get("id_subLote", idx+1)}</div>'
+                    )
+                ).add_to(m)
+                
+        except Exception as e:
+            st.error(f"Error añadiendo polígonos: {e}")
+    
+    def crear_mapa_ndvi(self, gdf_analizado, tipo_pastura):
+        """Crea mapa temático de NDVI"""
+        try:
+            fig, ax = plt.subplots(1, 1, figsize=(15, 10))
+            
+            # Crear colormap para NDVI
+            cmap = LinearSegmentedColormap.from_list('ndvi_cmap', ['#d73027', '#fee08b', '#a6d96a', '#1a9850'])
+            
+            # Plotear cada polígono con color según NDVI
+            for idx, row in gdf_analizado.iterrows():
+                ndvi = row['ndvi']
+                color = cmap(ndvi)
+                
+                gdf_analizado.iloc[[idx]].plot(
+                    ax=ax,
+                    color=color,
+                    edgecolor='black',
+                    linewidth=1
+                )
+                
+                # Añadir etiqueta
+                centroid = row.geometry.centroid
+                ax.annotate(
+                    f"S{row['id_subLote']}\n{ndvi:.2f}",
+                    (centroid.x, centroid.y),
+                    xytext=(5, 5),
+                    textcoords="offset points",
+                    fontsize=8,
+                    color='black',
+                    weight='bold',
+                    bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8)
+                )
+            
+            ax.set_title(f'🌿 MAPA DE NDVI - {tipo_pastura}', fontsize=16, fontweight='bold', pad=20)
+            ax.set_xlabel('Longitud')
+            ax.set_ylabel('Latitud')
+            ax.grid(True, alpha=0.3)
+            
+            # Añadir barra de color
+            sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0, vmax=1))
+            sm.set_array([])
+            cbar = plt.colorbar(sm, ax=ax, shrink=0.8)
+            cbar.set_label('NDVI', fontsize=12, fontweight='bold')
+            
+            plt.tight_layout()
+            
+            # Convertir a imagen para Streamlit
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+            buf.seek(0)
+            plt.close()
+            
+            return buf
+            
+        except Exception as e:
+            st.error(f"Error creando mapa NDVI: {e}")
+            return None
 
 # =============================================================================
-# ANÁLISIS FORRAJERO MEJORADO
+# ANÁLISIS PRINCIPAL
 # =============================================================================
 
 def analisis_forrajero_completo(gdf, config):
@@ -742,14 +511,16 @@ def analisis_forrajero_completo(gdf, config):
     try:
         st.header("🌱 ANÁLISIS FORRAJERO COMPLETO")
         
+        # Mostrar información del potrero
+        area_total = calcular_superficie(gdf).sum()
+        st.success(f"✅ Potrero cargado: {area_total:.1f} ha, {len(gdf)} polígonos")
+        
         # PASO 1: Mostrar mapa inicial
         st.subheader("🗺️ MAPA INICIAL DEL POTRERO")
-        mostrar_mapa_interactivo(
-            gdf, 
-            config['mapa_base'],
-            config['fecha_imagen'],
-            config['nubes_max']
-        )
+        visualizador = VisualizadorMapas()
+        mapa = visualizador.crear_mapa_base(gdf, config['mapa_base'])
+        if mapa:
+            folium_static(mapa, width=1000, height=500)
         
         # PASO 2: Dividir potrero
         st.subheader("📐 DIVIDIENDO POTRERO EN SUB-LOTES")
@@ -760,29 +531,65 @@ def analisis_forrajero_completo(gdf, config):
         
         # Mostrar mapa dividido
         st.subheader("🗺️ POTRERO DIVIDIDO")
-        mostrar_mapa_interactivo(
-            gdf_dividido,
-            config['mapa_base'],
-            config['fecha_imagen'],
-            config['nubes_max']
-        )
+        mapa_dividido = visualizador.crear_mapa_base(gdf_dividido, config['mapa_base'])
+        if mapa_dividido:
+            folium_static(mapa_dividido, width=1000, height=500)
         
-        # PASO 3: Análisis con Sentinel-2 si está disponible
-        if ee_initialized and config['fuente_satelital'] == 'SENTINEL-2':
-            st.subheader("🛰️ ANÁLISIS CON SENTINEL-2")
-            with st.spinner("Analizando con Sentinel-2..."):
-                # Aquí iría tu análisis detallado con Sentinel-2
-                resultados = analizar_con_sentinel(gdf_dividido, config)
-        else:
-            st.subheader("📊 ANÁLISIS SIMULADO")
-            with st.spinner("Realizando análisis..."):
-                # Análisis simulado como fallback
-                resultados = analisis_simulado(gdf_dividido, config)
+        # PASO 3: Simular datos satelitales
+        st.subheader("🛰️ SIMULANDO DATOS SATELITALES")
+        with st.spinner("Generando datos de vegetación..."):
+            simulador = SimuladorSatelital()
+            resultados = []
+            
+            for idx, row in gdf_dividido.iterrows():
+                centroid = row.geometry.centroid
+                indices = simulador.simular_indices_vegetacion(
+                    row['id_subLote'], 
+                    centroid, 
+                    config['fecha_imagen']
+                )
+                
+                # Calcular biomasa
+                biomasa_total = calcular_biomasa(indices['ndvi'], config['tipo_pastura'])
+                biomasa_disponible = biomasa_total * 0.6  # 60% de aprovechamiento
+                
+                resultados.append({
+                    'id_subLote': row['id_subLote'],
+                    'area_ha': calcular_superficie(gpd.GeoDataFrame([row], crs=gdf_dividido.crs))[0],
+                    'ndvi': indices['ndvi'],
+                    'evi': indices['evi'],
+                    'savi': indices['savi'],
+                    'tipo_superficie': indices['tipo_superficie'],
+                    'cobertura_vegetal': indices['cobertura_vegetal'],
+                    'biomasa_total_kg_ms_ha': biomasa_total,
+                    'biomasa_disponible_kg_ms_ha': biomasa_disponible,
+                    'crecimiento_diario': obtener_parametros_forrajeros(config['tipo_pastura'])['CRECIMIENTO_DIARIO']
+                })
         
-        # PASO 4: Mostrar resultados
-        mostrar_resultados(resultados, config)
+        # Crear GeoDataFrame con resultados
+        gdf_analizado = gdf_dividido.copy()
+        for col in ['area_ha', 'ndvi', 'evi', 'savi', 'tipo_superficie', 'cobertura_vegetal', 
+                   'biomasa_total_kg_ms_ha', 'biomasa_disponible_kg_ms_ha', 'crecimiento_diario']:
+            gdf_analizado[col] = [r[col] for r in resultados]
         
-        st.session_state.analisis_completo = True
+        # PASO 4: Calcular métricas ganaderas
+        st.subheader("🐄 CALCULANDO MÉTRICAS GANADERAS")
+        with st.spinner("Calculando equivalentes vaca..."):
+            metricas = calcular_metricas_ganaderas(
+                gdf_analizado, 
+                config['tipo_pastura'], 
+                config['peso_promedio'], 
+                config['carga_animal']
+            )
+        
+        # Añadir métricas al GeoDataFrame
+        for col in ['ev_soportable', 'dias_permanencia', 'biomasa_total_kg', 'consumo_individual_kg', 'ev_ha']:
+            gdf_analizado[col] = [m[col] for m in metricas]
+        
+        # PASO 5: Mostrar resultados
+        mostrar_resultados_completos(gdf_analizado, config)
+        
+        st.session_state.analisis_completado = True
         return True
         
     except Exception as e:
@@ -791,267 +598,237 @@ def analisis_forrajero_completo(gdf, config):
         st.error(f"Detalle: {traceback.format_exc()}")
         return False
 
-def analizar_con_sentinel(gdf, config):
-    """Análisis usando datos reales de Sentinel-2"""
-    try:
-        processor = Sentinel2Processor()
-        visualizador = MapVisualizer()
-        
-        # Convertir a geometría EE
-        geojson_dict = json.loads(gdf.to_json())
-        geometry = ee.Geometry(geojson_dict['features'][0]['geometry'])
-        
-        # Obtener imagen
-        image = processor.get_best_image(
-            geometry, 
-            config['fecha_imagen'],
-            cloud_filter=config['nubes_max']
-        )
-        
-        if image:
-            st.success("✅ Imagen Sentinel-2 obtenida exitosamente")
-            
-            # Mostrar mapa con NDVI
-            st.subheader("🟢 MAPA DE NDVI - SENTINEL-2")
-            mapa_sentinel = visualizador.create_sentinel_map(
-                gdf, config['fecha_imagen'], config['nubes_max'], 'NDVI'
-            )
-            
-            # Extraer valores para análisis
-            resultados = []
-            for idx, row in gdf.iterrows():
-                sub_geometry = ee.Geometry(json.loads(gpd.GeoSeries([row.geometry]).to_json())['features'][0]['geometry'])
-                valores = processor.extract_values_for_geometry(image, sub_geometry)
-                
-                if valores:
-                    resultados.append({
-                        'id_subLote': row['id_subLote'],
-                        'ndvi': valores.get('NDVI', 0),
-                        'evi': valores.get('EVI', 0),
-                        'savi': valores.get('SAVI', 0),
-                        'area_ha': calcular_superficie(gpd.GeoDataFrame([row], crs=gdf.crs))
-                    })
-            
-            return resultados
-        else:
-            st.warning("⚠️ No se pudo obtener imagen Sentinel-2. Usando análisis simulado.")
-            return analisis_simulado(gdf, config)
-            
-    except Exception as e:
-        st.error(f"Error en análisis Sentinel: {e}")
-        return analisis_simulado(gdf, config)
-
-def analisis_simulado(gdf, config):
-    """Análisis simulado cuando no hay datos reales"""
-    resultados = []
-    
-    for idx, row in gdf.iterrows():
-        # Simular valores basados en posición
-        centroid = row.geometry.centroid
-        x_norm = (centroid.x - gdf.total_bounds[0]) / (gdf.total_bounds[2] - gdf.total_bounds[0])
-        y_norm = (centroid.y - gdf.total_bounds[1]) / (gdf.total_bounds[3] - gdf.total_bounds[1])
-        
-        # Simular NDVI con patrón espacial
-        ndvi_base = 0.3 + (x_norm * y_norm * 0.4)
-        ndvi = max(0.1, min(0.8, ndvi_base + np.random.normal(0, 0.1)))
-        
-        resultados.append({
-            'id_subLote': row['id_subLote'],
-            'ndvi': ndvi,
-            'evi': ndvi * 1.1,
-            'savi': ndvi * 1.05,
-            'area_ha': calcular_superficie(gpd.GeoDataFrame([row], crs=gdf.crs))[0],
-            'tipo_superficie': clasificar_superficie(ndvi),
-            'biomasa_kg_ms_ha': calcular_biomasa_simulada(ndvi, config['tipo_pastura'])
-        })
-    
-    return resultados
-
-def clasificar_superficie(ndvi):
-    """Clasifica el tipo de superficie basado en NDVI"""
-    if ndvi < 0.2:
-        return "SUELO_DESNUDO"
-    elif ndvi < 0.4:
-        return "VEGETACION_ESCASA"
-    elif ndvi < 0.6:
-        return "VEGETACION_MODERADA"
-    else:
-        return "VEGETACION_DENSA"
-
-def calcular_biomasa_simulada(ndvi, tipo_pastura):
-    """Calcula biomasa simulada basada en NDVI y tipo de pastura"""
-    params = obtener_parametros_forrajeros(tipo_pastura)
-    biomasa_base = params['MS_POR_HA_OPTIMO'] * ndvi
-    return max(0, biomasa_base * (0.5 + ndvi * 0.5))
-
-def mostrar_resultados(resultados, config):
-    """Muestra los resultados del análisis"""
+def mostrar_resultados_completos(gdf_analizado, config):
+    """Muestra todos los resultados del análisis"""
     st.header("📊 RESULTADOS DEL ANÁLISIS")
-    
-    if not resultados:
-        st.warning("No hay resultados para mostrar")
-        return
-    
-    # Convertir a DataFrame
-    df_resultados = pd.DataFrame(resultados)
     
     # Métricas principales
     st.subheader("📈 MÉTRICAS PRINCIPALES")
+    
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        ndvi_prom = df_resultados['ndvi'].mean()
+        ndvi_prom = gdf_analizado['ndvi'].mean()
         st.metric("NDVI Promedio", f"{ndvi_prom:.3f}")
     
     with col2:
-        area_total = df_resultados['area_ha'].sum()
-        st.metric("Área Total", f"{area_total:.1f} ha")
+        biomasa_prom = gdf_analizado['biomasa_disponible_kg_ms_ha'].mean()
+        st.metric("Biomasa Disponible", f"{biomasa_prom:.0f} kg MS/ha")
     
     with col3:
-        biomasa_prom = df_resultados.get('biomasa_kg_ms_ha', [0]).mean()
-        st.metric("Biomasa Promedio", f"{biomasa_prom:.0f} kg MS/ha")
+        area_total = gdf_analizado['area_ha'].sum()
+        st.metric("Área Total", f"{area_total:.1f} ha")
     
     with col4:
-        vegetacion_densa = len([r for r in resultados if r.get('tipo_superficie') == 'VEGETACION_DENSA'])
-        st.metric("Sub-lotes Óptimos", vegetacion_densa)
+        ev_total = gdf_analizado['ev_soportable'].sum()
+        st.metric("Equivalentes Vaca", f"{ev_total:.1f}")
     
-    # Gráficos
-    st.subheader("📊 GRÁFICOS DE ANÁLISIS")
+    # Mapa de NDVI
+    st.subheader("🟢 MAPA DE NDVI")
+    visualizador = VisualizadorMapas()
+    mapa_ndvi = visualizador.crear_mapa_ndvi(gdf_analizado, config['tipo_pastura'])
+    if mapa_ndvi:
+        st.image(mapa_ndvi, use_container_width=True)
+        
+        # Botón de descarga
+        st.download_button(
+            "📥 Descargar Mapa NDVI",
+            mapa_ndvi.getvalue(),
+            f"mapa_ndvi_{config['tipo_pastura']}_{datetime.now().strftime('%Y%m%d_%H%M')}.png",
+            "image/png"
+        )
     
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Histograma de NDVI
-        fig_ndvi = px.histogram(df_resultados, x='ndvi', 
-                               title='Distribución de NDVI',
-                               labels={'ndvi': 'NDVI', 'count': 'Número de Sub-lotes'})
-        st.plotly_chart(fig_ndvi, use_container_width=True)
-    
-    with col2:
-        # Scatter plot de área vs NDVI
-        if 'area_ha' in df_resultados.columns and 'ndvi' in df_resultados.columns:
-            fig_scatter = px.scatter(df_resultados, x='area_ha', y='ndvi',
-                                   color='tipo_superficie' if 'tipo_superficie' in df_resultados.columns else None,
-                                   title='Relación Área vs NDVI',
-                                   labels={'area_ha': 'Área (ha)', 'ndvi': 'NDVI'})
-            st.plotly_chart(fig_scatter, use_container_width=True)
-    
-    # Tabla de resultados
+    # Tabla de resultados detallados
     st.subheader("📋 DETALLES POR SUB-LOTE")
-    st.dataframe(df_resultados, use_container_width=True)
     
-    # Botón de descarga
-    csv = df_resultados.to_csv(index=False)
+    columnas_detalle = [
+        'id_subLote', 'area_ha', 'tipo_superficie', 'ndvi', 
+        'biomasa_disponible_kg_ms_ha', 'ev_soportable', 'dias_permanencia'
+    ]
+    
+    tabla_detalle = gdf_analizado[columnas_detalle].copy()
+    tabla_detalle.columns = [
+        'Sub-Lote', 'Área (ha)', 'Tipo Superficie', 'NDVI',
+        'Biomasa Disp (kg MS/ha)', 'EV', 'Días Permanencia'
+    ]
+    
+    st.dataframe(tabla_detalle, use_container_width=True)
+    
+    # Descarga de resultados
+    st.subheader("💾 EXPORTAR RESULTADOS")
+    
+    # CSV
+    csv = tabla_detalle.to_csv(index=False)
     st.download_button(
-        label="📥 Descargar Resultados (CSV)",
-        data=csv,
-        file_name=f"resultados_forrajeros_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-        mime="text/csv"
+        "📥 Descargar CSV",
+        csv,
+        f"resultados_forrajeros_{config['tipo_pastura']}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+        "text/csv"
+    )
+    
+    # Información adicional
+    with st.expander("📊 ESTADÍSTICAS DETALLADAS"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("**Distribución de tipos de superficie:**")
+            distribucion = gdf_analizado['tipo_superficie'].value_counts()
+            for tipo, count in distribucion.items():
+                porcentaje = (count / len(gdf_analizado)) * 100
+                st.write(f"- {tipo}: {count} sub-lotes ({porcentaje:.1f}%)")
+        
+        with col2:
+            st.write("**Rangos de NDVI:**")
+            st.write(f"- Mínimo: {gdf_analizado['ndvi'].min():.3f}")
+            st.write(f"- Máximo: {gdf_analizado['ndvi'].max():.3f}")
+            st.write(f"- Promedio: {gdf_analizado['ndvi'].mean():.3f}")
+
+# =============================================================================
+# SIDEBAR - CONFIGURACIÓN
+# =============================================================================
+
+with st.sidebar:
+    st.header("⚙️ Configuración")
+    
+    st.subheader("🗺️ Mapa Base")
+    mapa_base = st.selectbox(
+        "Tipo de mapa:",
+        ["google_satellite", "world_imagery", "openstreetmap"],
+        help="Selecciona la base cartográfica"
+    )
+    
+    st.subheader("📅 Configuración Temporal")
+    fecha_imagen = st.date_input(
+        "Fecha de análisis:",
+        value=datetime.now() - timedelta(days=30),
+        max_value=datetime.now()
+    )
+    
+    st.subheader("🌿 Tipo de Pastura")
+    tipo_pastura = st.selectbox(
+        "Seleccionar tipo:",
+        ["ALFALFA", "RAYGRASS", "FESTUCA", "AGROPIRRO", "PASTIZAL_NATURAL"]
+    )
+    
+    st.subheader("🐄 Parámetros Ganaderos")
+    peso_promedio = st.slider("Peso promedio (kg):", 300, 600, 450)
+    carga_animal = st.slider("Carga animal:", 50, 1000, 100)
+    
+    st.subheader("📐 División del Potrero")
+    n_divisiones = st.slider("Número de sub-lotes:", 8, 32, 16)
+    
+    st.subheader("📤 Cargar Datos")
+    uploaded_zip = st.file_uploader(
+        "Subir ZIP con shapefile:",
+        type=['zip'],
+        help="Archivo ZIP que contiene el shapefile del potrero"
     )
 
 # =============================================================================
 # INTERFAZ PRINCIPAL
 # =============================================================================
 
-# Sección de mapa interactivo
-st.markdown("## 🗺️ VISUALIZACIÓN INTERACTIVA")
-
-if st.session_state.gdf_cargado is not None:
-    # Selector de tipo de visualización
-    col1, col2 = st.columns([1, 4])
+def main():
+    """Función principal de la aplicación"""
     
-    with col1:
-        tipo_visualizacion = st.selectbox(
-            "Tipo de visualización:",
-            ["google_satellite", "sentinel_ndvi", "world_imagery", "topographic"],
-            format_func=lambda x: x.replace('_', ' ').title()
-        )
+    # Procesar archivo subido
+    if uploaded_zip is not None and st.session_state.gdf_cargado is None:
+        with st.spinner("Cargando y procesando shapefile..."):
+            try:
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    with zipfile.ZipFile(uploaded_zip, 'r') as zip_ref:
+                        zip_ref.extractall(tmp_dir)
+                    
+                    shp_files = [f for f in os.listdir(tmp_dir) if f.endswith('.shp')]
+                    if shp_files:
+                        shp_path = os.path.join(tmp_dir, shp_files[0])
+                        gdf_cargado = gpd.read_file(shp_path)
+                        
+                        # Verificar CRS
+                        if gdf_cargado.crs is None:
+                            gdf_cargado = gdf_cargado.set_crs('EPSG:4326')
+                            st.warning("⚠️ CRS no definido. Asumiendo WGS84 (EPSG:4326)")
+                        
+                        st.session_state.gdf_cargado = gdf_cargado
+                        st.success("✅ Shapefile cargado correctamente")
+                    else:
+                        st.error("❌ No se encontró archivo .shp en el ZIP")
+            except Exception as e:
+                st.error(f"❌ Error cargando shapefile: {str(e)}")
+    
+    # Contenido principal
+    if st.session_state.gdf_cargado is not None:
+        # Mostrar información del potrero cargado
+        gdf = st.session_state.gdf_cargado
+        area_total = calcular_superficie(gdf).sum()
         
-        if tipo_visualizacion == "sentinel_ndvi":
-            indice_seleccionado = st.selectbox(
-                "Índice a visualizar:",
-                ["NDVI", "EVI", "SAVI", "MSAVI2", "BSI", "NDBI"]
-            )
-        else:
-            indice_seleccionado = "NDVI"
-    
-    # Mostrar mapa
-    mostrar_mapa_interactivo(
-        st.session_state.gdf_cargado,
-        tipo_visualizacion,
-        fecha_imagen,
-        nubes_max,
-        indice_seleccionado
-    )
-else:
-    st.info("""
-    ## 📋 INSTRUCCIONES DE USO
-    
-    1. **Configura los parámetros** en la barra lateral
-    2. **Sube el archivo ZIP** con el shapefile del potrero
-    3. **Visualiza el mapa** interactivo
-    4. **Ejecuta el análisis** forrajero completo
-    
-    ### 🛰️ CARACTERÍSTICAS:
-    
-    **Sentinel-2 Harmonized:**
-    - Resolución: 10 metros
-    - Índices: NDVI, EVI, SAVI, MSAVI2, BSI, NDBI
-    - Frecuencia: 5 días
-    
-    **Google Satellite:**
-    - Imágenes de alta resolución
-    - Base cartográfica actualizada
-    - Perfecta para referencia visual
-    
-    **Análisis Forrajero:**
-    - Biomasa disponible
-    - Equivalentes vaca
-    - Días de permanencia
-    - Recomendaciones de manejo
-    """)
-
-# Botón de análisis principal
-st.markdown("---")
-st.markdown("## 🚀 ANÁLISIS FORRAJERO COMPLETO")
-
-if st.session_state.gdf_cargado is not None:
-    if st.button("🎯 EJECUTAR ANÁLISIS FORRAJERO COMPLETO", 
-                type="primary", 
-                use_container_width=True,
-                key="analisis_completo"):
+        st.header("📁 DATOS CARGADOS")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Polígonos", len(gdf))
+        with col2:
+            st.metric("Área Total", f"{area_total:.1f} ha")
+        with col3:
+            st.metric("Pastura", tipo_pastura)
+        with col4:
+            st.metric("Sub-lotes", n_divisiones)
         
-        config = {
-            'fuente_satelital': fuente_satelital,
-            'mapa_base': mapa_base,
-            'fecha_imagen': fecha_imagen,
-            'nubes_max': nubes_max,
-            'tipo_pastura': tipo_pastura,
-            'peso_promedio': peso_promedio,
-            'carga_animal': carga_animal,
-            'n_divisiones': n_divisiones,
-            'umbral_ndvi_minimo': umbral_ndvi_minimo,
-            'umbral_ndvi_optimo': umbral_ndvi_optimo,
-            'sensibilidad_suelo': sensibilidad_suelo
-        }
+        # Botón de análisis
+        st.markdown("---")
+        st.header("🚀 ANÁLISIS FORRAJERO")
         
-        with st.spinner("🔬 Ejecutando análisis forrajero completo..."):
-            resultado = analisis_forrajero_completo(st.session_state.gdf_cargado, config)
+        if st.button("🎯 EJECUTAR ANÁLISIS COMPLETO", type="primary", use_container_width=True):
+            config = {
+                'mapa_base': mapa_base,
+                'fecha_imagen': fecha_imagen,
+                'tipo_pastura': tipo_pastura,
+                'peso_promedio': peso_promedio,
+                'carga_animal': carga_animal,
+                'n_divisiones': n_divisiones
+            }
             
-        if resultado:
-            st.balloons()
-            st.success("🎉 ¡Análisis completado exitosamente!")
-else:
-    st.warning("⚠️ Por favor, carga un shapefile para ejecutar el análisis")
+            with st.spinner("Realizando análisis forrajero completo..."):
+                resultado = analisis_forrajero_completo(gdf, config)
+                
+            if resultado:
+                st.balloons()
+                st.success("🎉 ¡Análisis completado exitosamente!")
+    
+    else:
+        # Pantalla de bienvenida
+        st.header("🌱 BIENVENIDO AL ANALIZADOR FORRAJERO")
+        
+        st.markdown("""
+        ### 📋 INSTRUCCIONES DE USO:
+        
+        1. **Configura los parámetros** en la barra lateral ←
+        2. **Sube un shapefile** en formato ZIP
+        3. **Ejecuta el análisis** forrajero completo
+        4. **Explora los resultados** y mapas interactivos
+        
+        ### 🛠️ CARACTERÍSTICAS:
+        
+        ✅ **Análisis forrajero** completo  
+        ✅ **Mapas interactivos** con Google Satellite  
+        ✅ **Simulación realista** de datos satelitales  
+        ✅ **Cálculo de biomasa** y equivalentes vaca  
+        ✅ **Recomendaciones** de manejo ganadero  
+        
+        ### 📁 FORMATO REQUERIDO:
+        
+        - **Archivo:** Formato ZIP que contenga shapefile (.shp, .shx, .dbf, .prj)
+        - **Sistema de coordenadas:** Preferiblemente WGS84 (EPSG:4326)
+        - **Tamaño máximo:** 50 MB
+        """)
+        
+        # Ejemplo de datos
+        with st.expander("🧪 PROBAR CON DATOS DE EJEMPLO"):
+            st.info("""
+            **Para probar sin datos:**
+            - Descarga shapefiles de ejemplo de [Natural Earth](https://www.naturalearthdata.com/)
+            - O crea polígonos simples en QGIS/ArcGIS
+            - Cualquier shapefile válido funcionará
+            """)
 
-# =============================================================================
-# PIE DE PÁGINA
-# =============================================================================
-
-st.markdown("---")
-st.markdown("""
-<div style='text-align: center; color: #666;'>
-    <p>🌱 <strong>Analizador Forrajero GEE</strong> - Desarrollado con Sentinel-2 & Google Earth Engine</p>
-    <p>📧 Soporte: soporte@forrajes.com | 🐛 Reportar issues: GitHub</p>
-</div>
-""", unsafe_allow_html=True)
+if __name__ == "__main__":
+    main()
