@@ -190,21 +190,11 @@ MAPAS_BASE = {
         "url": "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
         "attribution": "CartoDB",
         "name": "CartoDB Dark"
-    },
-    "Stamen Terrain": {
-        "url": "https://stamen-tiles-{s}.a.ssl.fastly.net/terrain/{z}/{x}/{y}.jpg",
-        "attribution": "Stamen Design",
-        "name": "Stamen Terrain"
-    },
-    "Stamen Toner": {
-        "url": "https://stamen-tiles-{s}.a.ssl.fastly.net/toner/{z}/{x}/{y}.png",
-        "attribution": "Stamen Design",
-        "name": "Stamen Toner"
     }
 }
 
 # =============================================================================
-# FUNCIONES DE VISUALIZACIÓN DE MAPAS
+# FUNCIONES DE VISUALIZACIÓN DE MAPAS CORREGIDAS
 # =============================================================================
 
 def crear_mapa_base(gdf, mapa_seleccionado="ESRI World Imagery", zoom_start=14):
@@ -245,7 +235,7 @@ def crear_mapa_base(gdf, mapa_seleccionado="ESRI World Imagery", zoom_start=14):
     return m
 
 def agregar_capa_poligonos(mapa, gdf, nombre_capa, color='blue', fill_opacity=0.3):
-    """Agrega una capa de polígonos al mapa"""
+    """Agrega una capa de polígonos al mapa - VERSIÓN CORREGIDA"""
     
     def estilo_poligono(feature):
         return {
@@ -256,15 +246,48 @@ def agregar_capa_poligonos(mapa, gdf, nombre_capa, color='blue', fill_opacity=0.
             'opacity': 0.8
         }
     
+    # Verificar qué campos están disponibles para el tooltip
+    available_fields = []
+    available_aliases = []
+    
+    # Campos comunes que podrían estar en el GeoDataFrame
+    possible_fields = ['id_subLote', 'id', 'nombre', 'name', 'area_ha', 'ndvi']
+    
+    for field in possible_fields:
+        if field in gdf.columns:
+            available_fields.append(field)
+            if field == 'id_subLote':
+                available_aliases.append('Sub-Lote:')
+            elif field == 'id':
+                available_aliases.append('ID:')
+            elif field == 'nombre':
+                available_aliases.append('Nombre:')
+            elif field == 'name':
+                available_aliases.append('Name:')
+            elif field == 'area_ha':
+                available_aliases.append('Área (ha):')
+            elif field == 'ndvi':
+                available_aliases.append('NDVI:')
+    
+    # Si no hay campos específicos, usar un tooltip genérico
+    if not available_fields:
+        tooltip = folium.GeoJsonTooltip(
+            fields=[],
+            aliases=[],
+            localize=True
+        )
+    else:
+        tooltip = folium.GeoJsonTooltip(
+            fields=available_fields,
+            aliases=available_aliases,
+            localize=True
+        )
+    
     folium.GeoJson(
         gdf.__geo_interface__,
         name=nombre_capa,
         style_function=estilo_poligono,
-        tooltip=folium.GeoJsonTooltip(
-            fields=['id_subLote'] if 'id_subLote' in gdf.columns else [],
-            aliases=['Sub-Lote:'] if 'id_subLote' in gdf.columns else ['Polígono:'],
-            localize=True
-        )
+        tooltip=tooltip
     ).add_to(mapa)
 
 def crear_mapa_ndvi(gdf_resultados, mapa_base="ESRI World Imagery"):
@@ -292,18 +315,6 @@ def crear_mapa_ndvi(gdf_resultados, mapa_base="ESRI World Imagery"):
             'opacity': 0.8
         }
     
-    # Función para tooltip
-    def tooltip_ndvi(feature):
-        ndvi = feature['properties']['ndvi']
-        area = feature['properties']['area_ha']
-        biomasa = feature['properties']['biomasa_kg_ms_ha']
-        return f"""
-        <b>Sub-Lote: {feature['properties']['id_subLote']}</b><br>
-        NDVI: {ndvi:.3f}<br>
-        Área: {area:.2f} ha<br>
-        Biomasa: {biomasa:.0f} kg MS/ha
-        """
-    
     # Agregar capa de NDVI
     folium.GeoJson(
         gdf_resultados.__geo_interface__,
@@ -312,22 +323,21 @@ def crear_mapa_ndvi(gdf_resultados, mapa_base="ESRI World Imagery"):
         tooltip=folium.GeoJsonTooltip(
             fields=['id_subLote', 'ndvi', 'area_ha', 'biomasa_kg_ms_ha'],
             aliases=['Sub-Lote:', 'NDVI:', 'Área (ha):', 'Biomasa (kg MS/ha):'],
-            localize=True,
-            formatter=".3f"
+            localize=True
         )
     ).add_to(m)
     
     # Agregar leyenda de NDVI
     legend_html = '''
     <div style="position: fixed; 
-                bottom: 50px; left: 50px; width: 200px; height: 150px; 
+                bottom: 50px; left: 50px; width: 220px; height: 160px; 
                 background-color: white; border:2px solid grey; z-index:9999; 
-                font-size:14px; padding: 10px">
-    <p><strong>Leyenda NDVI</strong></p>
-    <p><i style="background:#8B4513; width:20px; height:20px; display:inline-block; margin-right:5px"></i> < 0.2 (Suelo)</p>
-    <p><i style="background:#FFD700; width:20px; height:20px; display:inline-block; margin-right:5px"></i> 0.2-0.4 (Escasa)</p>
-    <p><i style="background:#32CD32; width:20px; height:20px; display:inline-block; margin-right:5px"></i> 0.4-0.6 (Moderada)</p>
-    <p><i style="background:#006400; width:20px; height:20px; display:inline-block; margin-right:5px"></i> > 0.6 (Densa)</p>
+                font-size:14px; padding: 10px; border-radius: 5px;">
+    <p style="margin:0; font-weight:bold;">🌿 Leyenda NDVI</p>
+    <p style="margin:2px 0;"><i style="background:#8B4513; width:20px; height:20px; display:inline-block; margin-right:5px; border:1px solid black"></i> < 0.2 (Suelo)</p>
+    <p style="margin:2px 0;"><i style="background:#FFD700; width:20px; height:20px; display:inline-block; margin-right:5px; border:1px solid black"></i> 0.2-0.4 (Escasa)</p>
+    <p style="margin:2px 0;"><i style="background:#32CD32; width:20px; height:20px; display:inline-block; margin-right:5px; border:1px solid black"></i> 0.4-0.6 (Moderada)</p>
+    <p style="margin:2px 0;"><i style="background:#006400; width:20px; height:20px; display:inline-block; margin-right:5px; border:1px solid black"></i> > 0.6 (Densa)</p>
     </div>
     '''
     m.get_root().html.add_child(folium.Element(legend_html))
@@ -338,7 +348,7 @@ def crear_mapa_ndvi(gdf_resultados, mapa_base="ESRI World Imagery"):
     return m
 
 # =============================================================================
-# PARÁMETROS FORRAJEROS (igual que antes)
+# PARÁMETROS FORRAJEROS
 # =============================================================================
 
 PARAMETROS_FORRAJEROS = {
@@ -375,7 +385,7 @@ def obtener_parametros(tipo_pastura):
     return PARAMETROS_FORRAJEROS.get(tipo_pastura, PARAMETROS_FORRAJEROS['FESTUCA'])
 
 # =============================================================================
-# FUNCIONES BÁSICAS (igual que antes)
+# FUNCIONES BÁSICAS
 # =============================================================================
 
 def calcular_superficie(gdf):
