@@ -1,7 +1,6 @@
-# 🌱 Sistema de Ganadería Regenerativa Voisin
+# Analizador Forrajero
 
-Sistema web para análisis forrajero basado en la metodología Voisin y algoritmos de Google Earth Engine.
-
+Aplicación para análisis de productividad forrajera usando datos satelitales.
 ## 🚀 Características
 
 - **Análisis Forrajero Regenerativo**: Metodología Voisin adaptada
