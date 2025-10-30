@@ -1,6 +1,5 @@
 import folium
 import streamlit as st
-from streamlit_folium import st_folium
 import geopandas as gpd
 
 def create_interactive_map(gdf, image_s2, pasture_type, analysis_results):
@@ -25,7 +24,6 @@ def create_interactive_map(gdf, image_s2, pasture_type, analysis_results):
                 vis_params_ndvi = {'min': -0.2, 'max': 0.8, 'palette': ['blue', 'white', 'green']}
                 
                 # For demonstration, we'll add a simple tile layer
-                # In production, you'd use image_s2.getThumbURL or similar
                 ndvi_layer = folium.TileLayer(
                     tiles='',  # You'd add actual tile URL here
                     name='NDVI Sentinel-2',
@@ -33,7 +31,6 @@ def create_interactive_map(gdf, image_s2, pasture_type, analysis_results):
                     overlay=True,
                     opacity=0.6
                 )
-                # ndvi_layer.add_to(m)
                 
             except Exception as e:
                 st.warning(f"Capas satelitales no disponibles: {str(e)}")
