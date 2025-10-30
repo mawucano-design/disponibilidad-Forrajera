@@ -7,6 +7,3 @@ shapely==2.0.1
 folium==0.14.0
 streamlit-folium==0.15.1
 pyproj==3.6.0
-earthengine-api==0.1.370
-geemap==0.29.0
-plotly==5.15.0
