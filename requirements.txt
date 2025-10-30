@@ -7,3 +7,4 @@ shapely==2.0.1
 folium==0.14.0
 streamlit-folium==0.15.1
 pyproj==3.6.0
+fiona==1.9.4
