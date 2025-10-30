@@ -1,5 +1,4 @@
 import geopandas as gpd
-import pandas as pd
 import numpy as np
 from shapely.geometry import Polygon
 import math
@@ -63,57 +62,32 @@ def divide_pasture(gdf, n_zones):
         return gdf
 
 def simulate_forage_analysis(gdf_divided, pasture_type):
-    """Simulate forage analysis with realistic data"""
+    """Simulate forage analysis"""
     results = []
-    
-    # Parameters by pasture type
-    pasture_params = {
-        "ALFALFA": {"biomass_min": 800, "biomass_max": 1500, "ndvi_min": 0.5},
-        "RAYGRASS": {"biomass_min": 600, "biomass_max": 1200, "ndvi_min": 0.4},
-        "FESTUCA": {"biomass_min": 500, "biomass_max": 1000, "ndvi_min": 0.4},
-        "AGROPIRRO": {"biomass_min": 400, "biomass_max": 900, "ndvi_min": 0.3},
-        "PASTIZAL_NATURAL": {"biomass_min": 300, "biomass_max": 700, "ndvi_min": 0.3},
-        "PERSONALIZADO": {"biomass_min": 400, "biomass_max": 1000, "ndvi_min": 0.4}
-    }
-    
-    params = pasture_params.get(pasture_type, pasture_params["PERSONALIZADO"])
-    
-    for i, row in gdf_divided.iterrows():
-        # Simulate spatial variation based on position
-        centroid = row.geometry.centroid
-        spatial_variation = (centroid.x + centroid.y) % 1
+    for i in range(len(gdf_divided)):
+        if pasture_type == "ALFALFA":
+            biomass = np.random.uniform(800, 1500)
+            ndvi = np.random.uniform(0.5, 0.9)
+        elif pasture_type == "RAYGRASS":
+            biomass = np.random.uniform(600, 1200)
+            ndvi = np.random.uniform(0.4, 0.8)
+        elif pasture_type == "FESTUCA":
+            biomass = np.random.uniform(500, 1000)
+            ndvi = np.random.uniform(0.4, 0.8)
+        else:
+            biomass = np.random.uniform(400, 900)
+            ndvi = np.random.uniform(0.3, 0.7)
         
-        # Calculate values based on position and pasture type
-        biomass_base = params["biomass_min"] + (params["biomass_max"] - params["biomass_min"]) * spatial_variation
-        ndvi_base = params["ndvi_min"] + (0.8 - params["ndvi_min"]) * spatial_variation
-        
-        # Add controlled randomness
-        biomass = max(100, biomass_base + np.random.normal(0, 100))
-        ndvi = max(0.1, min(0.9, ndvi_base + np.random.normal(0, 0.1)))
-        
-        # Determine surface type based on NDVI
-        if ndvi < 0.2:
+        if ndvi < 0.3:
             surface_type = "SUELO_DESNUDO"
-            coverage = np.random.uniform(0.1, 0.3)
-        elif ndvi < 0.4:
-            surface_type = "VEGETACION_ESCASA"
-            coverage = np.random.uniform(0.3, 0.6)
         elif ndvi < 0.6:
             surface_type = "VEGETACION_MODERADA"
-            coverage = np.random.uniform(0.6, 0.8)
         else:
             surface_type = "VEGETACION_DENSA"
-            coverage = np.random.uniform(0.8, 0.95)
         
         results.append({
             'biomasa_disponible_kg_ms_ha': biomass,
             'ndvi': ndvi,
-            'evi': ndvi * 0.9 + np.random.normal(0, 0.05),
-            'savi': ndvi * 0.95 + np.random.normal(0, 0.03),
-            'cobertura_vegetal': coverage,
-            'tipo_superficie': surface_type,
-            'crecimiento_diario': biomass * 0.02 + np.random.normal(0, 5),
-            'factor_calidad': min(0.95, coverage * 0.8 + np.random.normal(0, 0.1))
+            'tipo_superficie': surface_type
         })
-    
     return results
