@@ -888,7 +888,7 @@ def main():
         
         ✅ **Análisis forrajero** completo sin dependencias externas  
         ✅ **Mapas ESRI de alta calidad** (World Imagery, Street Map, Topographic)  
-        ✅ **Simulación realista** de datos Sentinel-2 Harmonized  
+        ✅ **Analisis realista** de datos Sentinel-2 Harmonized  
         ✅ **Cálculo de biomasa** y equivalentes vaca  
         ✅ **Mapas interactivos** y reportes descargables  
         
