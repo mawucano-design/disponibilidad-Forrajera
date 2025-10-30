@@ -16,6 +16,9 @@ from utils.gee_utils import initialize_earth_engine, get_sentinel2_image, extrac
 from utils.mapping_utils import create_interactive_map
 from utils.analysis_utils import calculate_area, divide_pasture
 
+# Import st_folium
+from streamlit_folium import st_folium
+
 # Page config
 st.set_page_config(page_title="🌱 Analizador Forrajero GEE", layout="wide")
 st.title("🌱 ANALIZADOR FORRAJERO - METODOLOGÍA GEE")
