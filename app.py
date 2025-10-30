@@ -197,7 +197,7 @@ MAPAS_BASE = {
 # FUNCIONES DE VISUALIZACIÓN DE MAPAS CORREGIDAS
 # =============================================================================
 
-def crear_mapa_base(gdf, mapa_seleccionado="ESRI World Imagery", zoom_start=14):
+def crear_mapa_base(gdf, mapa_seleccionado="ESRI World Imagery", zoom_start=10):
     """Crea un mapa base con el estilo seleccionado"""
     
     # Calcular centro del mapa
@@ -656,14 +656,14 @@ def mostrar_resultados_sentinel_hub(gdf, config):
         st.subheader("🌿 MAPA DE NDVI")
         with st.spinner("Generando mapa..."):
             mapa_ndvi = crear_mapa_ndvi(gdf, mapa_base_seleccionado)
-            folium_static(mapa_ndvi, width=1000, height=600)
+            folium_static(mapa_ndvi, width=800, height=400)
     
     elif tipo_mapa == "Potrero Original":
         st.subheader("🗺️ POTRERO ORIGINAL")
         with st.spinner("Generando mapa..."):
             mapa_original = crear_mapa_base(st.session_state.gdf_cargado, mapa_base_seleccionado)
             agregar_capa_poligonos(mapa_original, st.session_state.gdf_cargado, "Potrero Original", 'blue', 0.5)
-            folium_static(mapa_original, width=1000, height=600)
+            folium_static(mapa_original, width=800, height=400)
     
     elif tipo_mapa == "Comparación":
         st.subheader("🔍 COMPARACIÓN: ORIGINAL VS SUB-LOTES")
@@ -673,12 +673,12 @@ def mostrar_resultados_sentinel_hub(gdf, config):
             st.markdown("**Potrero Original**")
             mapa_orig = crear_mapa_base(st.session_state.gdf_cargado, mapa_base_seleccionado)
             agregar_capa_poligonos(mapa_orig, st.session_state.gdf_cargado, "Original", 'blue', 0.5)
-            folium_static(mapa_orig, height=400)
+            folium_static(mapa_orig, height=300)
         
         with col_comp2:
             st.markdown("**Sub-Lotes con NDVI**")
             mapa_sublotes = crear_mapa_ndvi(gdf, mapa_base_seleccionado)
-            folium_static(mapa_sublotes, height=400)
+            folium_static(mapa_sublotes, height=300)
     
     # Tabla de resultados
     st.header("📋 DETALLES POR SUB-LOTE")
@@ -758,7 +758,7 @@ def main():
         with st.spinner("Cargando mapa..."):
             mapa_preview = crear_mapa_base(gdf, mapa_base)
             agregar_capa_poligonos(mapa_preview, gdf, "Potrero Cargado", 'red', 0.5)
-            folium_static(mapa_preview, width=1000, height=400)
+            folium_static(mapa_preview, width=800, height=300)
         
         if st.button("🚀 EJECUTAR ANÁLISIS SENTINEL HUB", type="primary"):
             config = {
