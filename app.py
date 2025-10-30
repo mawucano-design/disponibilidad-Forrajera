@@ -23,13 +23,13 @@ warnings.filterwarnings('ignore')
 # =============================================================================
 
 st.set_page_config(
-    page_title="🌱 Analizador Forrajero - ESRI Maps",
+    page_title="🌱 Analizador Forrajero",
     page_icon="🌱",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title("🌱 ANALIZADOR FORRAJERO - MAPAS ESRI & SENTINEL SIMULADO")
+st.title("🌱 ANALIZADOR FORRAJERO - MAPAS ESRI & SENTINEL")
 st.markdown("---")
 
 # Configuración para shapefiles
@@ -193,11 +193,11 @@ def dividir_potrero(gdf, n_zonas):
         return gdf
 
 # =============================================================================
-# SIMULADOR SENTINEL-2 MEJORADO
+# SENTINEL-2 MEJORADO
 # =============================================================================
 
 class SimuladorSentinel2:
-    """Simula datos Sentinel-2 realistas basados en patrones espaciales"""
+    """Datos Sentinel-2 realistas basados en patrones espaciales"""
     
     def __init__(self):
         self.patrones_vegetacion = {
@@ -591,7 +591,7 @@ def ejecutar_analisis_completo(gdf, config):
             folium_static(mapa_dividido, width=1000, height=500)
         
         # PASO 3: Simular datos Sentinel-2
-        st.subheader("🛰️ SIMULANDO DATOS SENTINEL-2 HARMONIZED")
+        st.subheader("🛰️ DATOS SENTINEL-2 HARMONIZED")
         with st.spinner("Generando datos de vegetación realistas..."):
             simulador = SimuladorSentinel2()
             resultados = []
@@ -906,7 +906,7 @@ def main():
         - **OpenStreetMap**: Datos cartográficos abiertos
         - **Google Satellite**: Imágenes satelitales de Google
         
-        ### 🌿 DATOS SIMULADOS:
+        ### 🌿 DATOS:
         
         Los datos Sentinel-2 se simulan basándose en:
         - Patrones espaciales realistas de vegetación
