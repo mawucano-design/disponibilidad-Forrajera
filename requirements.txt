@@ -11,4 +11,6 @@ pillow>=10.0.0
 requests>=2.31.0
 folium>=0.14.0
 streamlit-folium>=0.17.0
+earthengine-api>=0.1.364
+geemap>=0.29.0
 plotly>=5.17.0
