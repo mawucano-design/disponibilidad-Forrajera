@@ -209,7 +209,7 @@ class SimuladorSentinel2:
         }
     
     def simular_indices_vegetacion(self, id_subLote, centroid, fecha, area_ha):
-        """Simula índices de vegetación realistas basados en posición y fecha"""
+        """índices de vegetación realistas basados en posición y fecha"""
         try:
             # Variación espacial basada en posición (para patrones realistas)
             x_norm = (centroid.x * 1000) % 100 / 100
