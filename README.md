@@ -1,32 +1,26 @@
-# 🌱 Analizador Forrajero GEE
+# 🌱 Analizador Forrajero - GitHub
 
-Aplicación web para análisis de productividad forrajera usando **Sentinel-2 harmonizado (10m)** y **Google Satellite** como base de mapas.
+Aplicación web para análisis de productividad forrajera optimizada para GitHub Codespaces.
 
-## 🚀 Características Principales
+## 🚀 Características
 
-### 🛰️ Datos Satelitales
-- **Sentinel-2 Harmonized**: Imágenes de 10m de resolución
-- **Google Satellite**: Mapas base de alta calidad
-- **Múltiples índices**: NDVI, EVI, SAVI, MSAVI2, BSI, NDBI
-- **Filtro de nubes**: Selección automática de mejores imágenes
+- ✅ **Análisis forrajero** completo sin necesidad de Earth Engine
+- ✅ **Mapas interactivos** con Google Satellite y otras bases
+- ✅ **Simulación realista** de datos de vegetación
+- ✅ **Cálculo de biomasa** y equivalentes vaca
+- ✅ **Interfaz moderna** con Streamlit
 
-### 🗺️ Mapas Interactivos
-- **Google Satellite**: Imágenes reales actualizadas
-- **World Imagery**: Alternativa de ESRI
-- **Topográfico**: Mapas con relieve
-- **OpenStreetMap**: Datos abiertos
-- **Sentinel-2 NDVI**: Análisis de vegetación en tiempo real
+## 📦 Instalación y Uso
 
-### 📊 Análisis Forrajero
-- **Biomasa disponible** (kg MS/ha)
-- **Equivalentes Vaca** (EV)
-- **Días de permanencia**
-- **Recomendaciones de manejo**
-- **Mapas de productividad**
+### En GitHub Codespaces:
+1. Abre este repositorio en GitHub Codespaces
+2. Espera a que se instalen las dependencias automáticamente
+3. Ejecuta: `streamlit run app.py`
+4. La aplicación se abrirá automáticamente
 
-## 🛠️ Instalación
-
-### 1. Clonar el repositorio
+### Localmente:
 ```bash
-git clone https://github.com/tuusuario/analizador-forrajero.git
+git clone [tu-repositorio]
 cd analizador-forrajero
+pip install -r requirements.txt
+streamlit run app.py
