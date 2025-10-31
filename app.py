@@ -232,6 +232,113 @@ MAPAS_BASE = {
 }
 
 # =============================================================================
+# PARÁMETROS FORRAJEROS MEJORADOS (CON EV/HA)
+# =============================================================================
+
+PARAMETROS_FORRAJEROS = {
+    'ALFALFA': {
+        'MS_POR_HA_OPTIMO': 4000,
+        'CRECIMIENTO_DIARIO': 80,
+        'CONSUMO_PORCENTAJE_PESO': 0.03,
+        'TASA_UTILIZACION_RECOMENDADA': 0.65,
+        'FACTOR_BIOMASA_NDVI': 2800,
+        'UMBRAL_NDVI_SUELO': 0.15,
+        'UMBRAL_NDVI_PASTURA': 0.45,
+        'CONSUMO_DIARIO_EV': 12,  # kg MS/día por animal
+        'EFICIENCIA_PASTOREO': 0.75  # 75% de eficiencia en pastoreo
+    },
+    'RAYGRASS': {
+        'MS_POR_HA_OPTIMO': 3500,
+        'CRECIMIENTO_DIARIO': 70,
+        'CONSUMO_PORCENTAJE_PESO': 0.028,
+        'TASA_UTILIZACION_RECOMENDADA': 0.60,
+        'FACTOR_BIOMASA_NDVI': 2500,
+        'UMBRAL_NDVI_SUELO': 0.18,
+        'UMBRAL_NDVI_PASTURA': 0.50,
+        'CONSUMO_DIARIO_EV': 10,
+        'EFICIENCIA_PASTOREO': 0.70
+    },
+    'FESTUCA': {
+        'MS_POR_HA_OPTIMO': 3000,
+        'CRECIMIENTO_DIARIO': 50,
+        'CONSUMO_PORCENTAJE_PESO': 0.025,
+        'TASA_UTILIZACION_RECOMENDADA': 0.55,
+        'FACTOR_BIOMASA_NDVI': 2200,
+        'UMBRAL_NDVI_SUELO': 0.20,
+        'UMBRAL_NDVI_PASTURA': 0.55,
+        'CONSUMO_DIARIO_EV': 9,
+        'EFICIENCIA_PASTOREO': 0.65
+    },
+    'AGROPIRRO': {
+        'MS_POR_HA_OPTIMO': 3200,
+        'CRECIMIENTO_DIARIO': 55,
+        'CONSUMO_PORCENTAJE_PESO': 0.026,
+        'TASA_UTILIZACION_RECOMENDADA': 0.58,
+        'FACTOR_BIOMASA_NDVI': 2400,
+        'UMBRAL_NDVI_SUELO': 0.17,
+        'UMBRAL_NDVI_PASTURA': 0.52,
+        'CONSUMO_DIARIO_EV': 10,
+        'EFICIENCIA_PASTOREO': 0.68
+    },
+    'PASTIZAL_NATURAL': {
+        'MS_POR_HA_OPTIMO': 2500,
+        'CRECIMIENTO_DIARIO': 40,
+        'CONSUMO_PORCENTAJE_PESO': 0.022,
+        'TASA_UTILIZACION_RECOMENDADA': 0.50,
+        'FACTOR_BIOMASA_NDVI': 2000,
+        'UMBRAL_NDVI_SUELO': 0.22,
+        'UMBRAL_NDVI_PASTURA': 0.48,
+        'CONSUMO_DIARIO_EV': 8,
+        'EFICIENCIA_PASTOREO': 0.60
+    }
+}
+
+def obtener_parametros(tipo_pastura):
+    return PARAMETROS_FORRAJEROS.get(tipo_pastura, PARAMETROS_FORRAJEROS['FESTUCA'])
+
+# =============================================================================
+# FUNCIONES DE CÁLCULO DE EV/HA
+# =============================================================================
+
+def calcular_ev_ha(biomasa_disponible_kg_ms_ha, consumo_diario_ev, eficiencia_pastoreo=0.7):
+    """
+    Calcula Equivalente Vaca por hectárea (EV/ha)
+    
+    Fórmula: EV/ha = (Biomasa disponible kg MS/ha * Eficiencia pastoreo) / Consumo diario EV
+    
+    Donde:
+    - Biomasa disponible: kg MS/ha
+    - Consumo diario EV: kg MS/día por animal (generalmente 10-12 kg)
+    - Eficiencia pastoreo: % de biomasa que realmente consume el animal (0.6-0.8)
+    """
+    if consumo_diario_ev <= 0:
+        return 0
+    
+    ev_ha = (biomasa_disponible_kg_ms_ha * eficiencia_pastoreo) / consumo_diario_ev
+    return max(0, ev_ha)  # No valores negativos
+
+def calcular_carga_animal_total(ev_ha, area_ha):
+    """
+    Calcula la carga animal total para un área
+    """
+    return ev_ha * area_ha
+
+def clasificar_capacidad_carga(ev_ha):
+    """
+    Clasifica la capacidad de carga según EV/ha
+    """
+    if ev_ha < 0.5:
+        return "MUY BAJA", "#FF6B6B"
+    elif ev_ha < 1.0:
+        return "BAJA", "#FFA726"
+    elif ev_ha < 1.5:
+        return "MODERADA", "#FFD54F"
+    elif ev_ha < 2.0:
+        return "ALTA", "#AED581"
+    else:
+        return "MUY ALTA", "#66BB6A"
+
+# =============================================================================
 # FUNCIONES DE VISUALIZACIÓN DE MAPAS CORREGIDAS
 # =============================================================================
 
@@ -280,7 +387,7 @@ def agregar_capa_poligonos(mapa, gdf, nombre_capa, color='blue', fill_opacity=0.
     available_aliases = []
     
     # Campos comunes que podrían estar en el GeoDataFrame
-    possible_fields = ['id_subLote', 'id', 'nombre', 'name', 'area_ha', 'ndvi']
+    possible_fields = ['id_subLote', 'id', 'nombre', 'name', 'area_ha', 'ndvi', 'ev_ha']
     
     for field in possible_fields:
         if field in gdf.columns:
@@ -297,6 +404,8 @@ def agregar_capa_poligonos(mapa, gdf, nombre_capa, color='blue', fill_opacity=0.
                 available_aliases.append('Área (ha):')
             elif field == 'ndvi':
                 available_aliases.append('NDVI:')
+            elif field == 'ev_ha':
+                available_aliases.append('EV/ha:')
     
     # Si no hay campos específicos, usar un tooltip genérico
     if not available_fields:
@@ -350,8 +459,8 @@ def crear_mapa_ndvi(gdf_resultados, mapa_base="ESRI World Imagery"):
         name='NDVI por Sub-Lote',
         style_function=estilo_ndvi,
         tooltip=folium.GeoJsonTooltip(
-            fields=['id_subLote', 'ndvi', 'area_ha', 'biomasa_kg_ms_ha'],
-            aliases=['Sub-Lote:', 'NDVI:', 'Área (ha):', 'Biomasa (kg MS/ha):'],
+            fields=['id_subLote', 'ndvi', 'area_ha', 'biomasa_kg_ms_ha', 'ev_ha'],
+            aliases=['Sub-Lote:', 'NDVI:', 'Área (ha):', 'Biomasa (kg MS/ha):', 'EV/ha:'],
             localize=True
         )
     ).add_to(m)
@@ -376,42 +485,56 @@ def crear_mapa_ndvi(gdf_resultados, mapa_base="ESRI World Imagery"):
     
     return m
 
-# =============================================================================
-# PARÁMETROS FORRAJEROS
-# =============================================================================
-
-PARAMETROS_FORRAJEROS = {
-    'ALFALFA': {
-        'MS_POR_HA_OPTIMO': 4000,
-        'CRECIMIENTO_DIARIO': 80,
-        'CONSUMO_PORCENTAJE_PESO': 0.03,
-        'TASA_UTILIZACION_RECOMENDADA': 0.65,
-        'FACTOR_BIOMASA_NDVI': 2800,
-        'UMBRAL_NDVI_SUELO': 0.15,
-        'UMBRAL_NDVI_PASTURA': 0.45
-    },
-    'RAYGRASS': {
-        'MS_POR_HA_OPTIMO': 3500,
-        'CRECIMIENTO_DIARIO': 70,
-        'CONSUMO_PORCENTAJE_PESO': 0.028,
-        'TASA_UTILIZACION_RECOMENDADA': 0.60,
-        'FACTOR_BIOMASA_NDVI': 2500,
-        'UMBRAL_NDVI_SUELO': 0.18,
-        'UMBRAL_NDVI_PASTURA': 0.50
-    },
-    'FESTUCA': {
-        'MS_POR_HA_OPTIMO': 3000,
-        'CRECIMIENTO_DIARIO': 50,
-        'CONSUMO_PORCENTAJE_PESO': 0.025,
-        'TASA_UTILIZACION_RECOMENDADA': 0.55,
-        'FACTOR_BIOMASA_NDVI': 2200,
-        'UMBRAL_NDVI_SUELO': 0.20,
-        'UMBRAL_NDVI_PASTURA': 0.55
-    }
-}
-
-def obtener_parametros(tipo_pastura):
-    return PARAMETROS_FORRAJEROS.get(tipo_pastura, PARAMETROS_FORRAJEROS['FESTUCA'])
+def crear_mapa_ev_ha(gdf_resultados, mapa_base="ESRI World Imagery"):
+    """Crea un mapa con visualización de EV/ha"""
+    
+    m = crear_mapa_base(gdf_resultados, mapa_base, zoom_start=12)
+    
+    # Función para determinar color basado en EV/ha
+    def estilo_ev_ha(feature):
+        ev_ha = feature['properties']['ev_ha']
+        clasificacion, color = clasificar_capacidad_carga(ev_ha)
+        
+        return {
+            'fillColor': color,
+            'color': 'black',
+            'weight': 1,
+            'fillOpacity': 0.7,
+            'opacity': 0.8
+        }
+    
+    # Agregar capa de EV/ha
+    folium.GeoJson(
+        gdf_resultados.__geo_interface__,
+        name='EV/ha por Sub-Lote',
+        style_function=estilo_ev_ha,
+        tooltip=folium.GeoJsonTooltip(
+            fields=['id_subLote', 'ev_ha', 'area_ha', 'biomasa_kg_ms_ha', 'carga_animal'],
+            aliases=['Sub-Lote:', 'EV/ha:', 'Área (ha):', 'Biomasa (kg MS/ha):', 'Carga Animal:'],
+            localize=True
+        )
+    ).add_to(m)
+    
+    # Agregar leyenda de EV/ha
+    legend_html = '''
+    <div style="position: fixed; 
+                bottom: 50px; left: 50px; width: 240px; height: 180px; 
+                background-color: white; border:2px solid grey; z-index:9999; 
+                font-size:14px; padding: 10px; border-radius: 5px;">
+    <p style="margin:0; font-weight:bold;">🐄 Capacidad de Carga (EV/ha)</p>
+    <p style="margin:2px 0;"><i style="background:#FF6B6B; width:20px; height:20px; display:inline-block; margin-right:5px; border:1px solid black"></i> < 0.5 (Muy Baja)</p>
+    <p style="margin:2px 0;"><i style="background:#FFA726; width:20px; height:20px; display:inline-block; margin-right:5px; border:1px solid black"></i> 0.5-1.0 (Baja)</p>
+    <p style="margin:2px 0;"><i style="background:#FFD54F; width:20px; height:20px; display:inline-block; margin-right:5px; border:1px solid black"></i> 1.0-1.5 (Moderada)</p>
+    <p style="margin:2px 0;"><i style="background:#AED581; width:20px; height:20px; display:inline-block; margin-right:5px; border:1px solid black"></i> 1.5-2.0 (Alta)</p>
+    <p style="margin:2px 0;"><i style="background:#66BB6A; width:20px; height:20px; display:inline-block; margin-right:5px; border:1px solid black"></i> > 2.0 (Muy Alta)</p>
+    </div>
+    '''
+    m.get_root().html.add_child(folium.Element(legend_html))
+    
+    # Control de capas
+    folium.LayerControl().add_to(m)
+    
+    return m
 
 # =============================================================================
 # FUNCIONES BÁSICAS
@@ -543,15 +666,34 @@ with st.sidebar:
     st.subheader("📐 División del Potrero")
     n_divisiones = st.slider("Número de sub-lotes:", 8, 32, 16)
     
+    st.subheader("🐄 Configuración EV")
+    consumo_diario_personalizado = st.number_input(
+        "Consumo diario por EV (kg MS):", 
+        min_value=8.0, 
+        max_value=15.0, 
+        value=10.0, 
+        step=0.5,
+        help="Consumo promedio de materia seca por animal por día"
+    )
+    
+    eficiencia_pastoreo = st.slider(
+        "Eficiencia de pastoreo (%):", 
+        min_value=50, 
+        max_value=90, 
+        value=70, 
+        step=5,
+        help="Porcentaje de biomasa que realmente consume el animal"
+    ) / 100.0
+    
     st.subheader("📤 Cargar Datos")
     uploaded_zip = st.file_uploader("Subir shapefile (ZIP):", type=['zip'])
 
 # =============================================================================
-# ANÁLISIS CON SENTINEL HUB
+# ANÁLISIS CON SENTINEL HUB Y EV/HA
 # =============================================================================
 
 def analisis_con_sentinel_hub(gdf, config):
-    """Análisis usando Sentinel Hub real"""
+    """Análisis usando Sentinel Hub real con cálculo de EV/ha"""
     try:
         st.header("🌱 ANÁLISIS FORRAJERO - SENTINEL HUB")
         
@@ -604,7 +746,15 @@ def analisis_con_sentinel_hub(gdf, config):
             # Calcular biomasa
             params = obtener_parametros(config['tipo_pastura'])
             biomasa_total = params['FACTOR_BIOMASA_NDVI'] * ndvi if ndvi else 0
-            biomasa_disponible = biomasa_total * 0.6
+            biomasa_disponible = biomasa_total * params['TASA_UTILIZACION_RECOMENDADA']
+            
+            # Calcular EV/ha - usar valor personalizado o el de los parámetros
+            consumo_diario = config.get('consumo_diario_personalizado', params['CONSUMO_DIARIO_EV'])
+            eficiencia = config.get('eficiencia_pastoreo', params['EFICIENCIA_PASTOREO'])
+            
+            ev_ha = calcular_ev_ha(biomasa_disponible, consumo_diario, eficiencia)
+            carga_animal = calcular_carga_animal_total(ev_ha, area_ha)
+            clasificacion_ev, color_ev = clasificar_capacidad_carga(ev_ha)
             
             # Clasificar vegetación
             if ndvi is None:
@@ -626,13 +776,18 @@ def analisis_con_sentinel_hub(gdf, config):
                 'ndvi': ndvi,
                 'tipo_superficie': tipo_veg,
                 'biomasa_kg_ms_ha': biomasa_disponible,
+                'ev_ha': ev_ha,
+                'carga_animal': carga_animal,
+                'clasificacion_carga': clasificacion_ev,
+                'color_carga': color_ev,
                 'fuente': fuente
             })
         
         progress_bar.empty()
         
         # Añadir resultados al GeoDataFrame
-        for col in ['area_ha', 'ndvi', 'tipo_superficie', 'biomasa_kg_ms_ha', 'fuente']:
+        for col in ['area_ha', 'ndvi', 'tipo_superficie', 'biomasa_kg_ms_ha', 'ev_ha', 
+                   'carga_animal', 'clasificacion_carga', 'color_carga', 'fuente']:
             gdf_dividido[col] = [r[col] for r in resultados]
         
         # Guardar en session state
@@ -647,11 +802,11 @@ def analisis_con_sentinel_hub(gdf, config):
         return False
 
 def mostrar_resultados_sentinel_hub(gdf, config):
-    """Muestra resultados con Sentinel Hub"""
+    """Muestra resultados con Sentinel Hub incluyendo EV/ha"""
     st.header("📊 RESULTADOS - SENTINEL HUB")
     
-    # Métricas
-    col1, col2, col3, col4 = st.columns(4)
+    # Métricas principales
+    col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
         ndvi_prom = gdf['ndvi'].mean()
@@ -662,12 +817,16 @@ def mostrar_resultados_sentinel_hub(gdf, config):
         st.metric("Biomasa Promedio", f"{biomasa_prom:.0f} kg MS/ha")
     
     with col3:
+        ev_ha_prom = gdf['ev_ha'].mean()
+        st.metric("EV/ha Promedio", f"{ev_ha_prom:.1f}")
+    
+    with col4:
         area_total = gdf['area_ha'].sum()
         st.metric("Área Total", f"{area_total:.1f} ha")
     
-    with col4:
-        datos_reales = len(gdf[gdf['fuente'] == 'SENTINEL_HUB'])
-        st.metric("Datos Reales", f"{datos_reales}/{len(gdf)}")
+    with col5:
+        carga_total = gdf['carga_animal'].sum()
+        st.metric("Carga Animal Total", f"{carga_total:.0f} EV")
     
     # VISUALIZACIÓN DE MAPAS
     st.header("🗺️ VISUALIZACIÓN EN MAPA")
@@ -677,7 +836,7 @@ def mostrar_resultados_sentinel_hub(gdf, config):
     with col_map1:
         tipo_mapa = st.selectbox(
             "Tipo de visualización:",
-            ["NDVI por Sub-Lote", "Potrero Original", "Comparación"]
+            ["NDVI por Sub-Lote", "EV/ha por Sub-Lote", "Potrero Original", "Comparación"]
         )
     with col_map2:
         mapa_base_seleccionado = st.selectbox(
@@ -692,6 +851,12 @@ def mostrar_resultados_sentinel_hub(gdf, config):
         with st.spinner("Generando mapa..."):
             mapa_ndvi = crear_mapa_ndvi(gdf, mapa_base_seleccionado)
             folium_static(mapa_ndvi, width=800, height=400)
+    
+    elif tipo_mapa == "EV/ha por Sub-Lote":
+        st.subheader("🐄 MAPA DE EV/HA")
+        with st.spinner("Generando mapa..."):
+            mapa_ev = crear_mapa_ev_ha(gdf, mapa_base_seleccionado)
+            folium_static(mapa_ev, width=800, height=400)
     
     elif tipo_mapa == "Potrero Original":
         st.subheader("🗺️ POTRERO ORIGINAL")
@@ -711,15 +876,33 @@ def mostrar_resultados_sentinel_hub(gdf, config):
             folium_static(mapa_orig, height=300)
         
         with col_comp2:
-            st.markdown("**Sub-Lotes con NDVI**")
-            mapa_sublotes = crear_mapa_ndvi(gdf, mapa_base_seleccionado)
+            st.markdown("**Sub-Lotes con EV/ha**")
+            mapa_sublotes = crear_mapa_ev_ha(gdf, mapa_base_seleccionado)
             folium_static(mapa_sublotes, height=300)
     
     # Tabla de resultados
     st.header("📋 DETALLES POR SUB-LOTE")
-    tabla = gdf[['id_subLote', 'area_ha', 'tipo_superficie', 'ndvi', 'biomasa_kg_ms_ha', 'fuente']].copy()
-    tabla.columns = ['Sub-Lote', 'Área (ha)', 'Tipo Superficie', 'NDVI', 'Biomasa (kg MS/ha)', 'Fuente']
+    tabla = gdf[['id_subLote', 'area_ha', 'tipo_superficie', 'ndvi', 'biomasa_kg_ms_ha', 'ev_ha', 'carga_animal', 'clasificacion_carga']].copy()
+    tabla.columns = ['Sub-Lote', 'Área (ha)', 'Tipo Superficie', 'NDVI', 'Biomasa (kg MS/ha)', 'EV/ha', 'Carga Animal', 'Clasificación']
     st.dataframe(tabla, use_container_width=True)
+    
+    # Resumen de capacidad de carga
+    st.header("🐄 RESUMEN DE CAPACIDAD DE CARGA")
+    
+    # Distribución de clasificaciones
+    distribucion = gdf['clasificacion_carga'].value_counts()
+    
+    col_carga1, col_carga2, col_carga3 = st.columns(3)
+    
+    with col_carga1:
+        st.metric("Capacidad Media", f"{gdf['ev_ha'].mean():.1f} EV/ha")
+    
+    with col_carga2:
+        st.metric("Carga Total Potencial", f"{gdf['carga_animal'].sum():.0f} EV")
+    
+    with col_carga3:
+        st.metric("Sub-Lotes con Alta Capacidad", 
+                 f"{len(gdf[gdf['clasificacion_carga'].isin(['ALTA', 'MUY ALTA'])])}/{len(gdf)}")
     
     # Descarga
     st.header("💾 EXPORTAR RESULTADOS")
@@ -799,7 +982,9 @@ def main():
             config = {
                 'fecha_imagen': fecha_imagen,
                 'tipo_pastura': tipo_pastura,
-                'n_divisiones': n_divisiones
+                'n_divisiones': n_divisiones,
+                'consumo_diario_personalizado': consumo_diario_personalizado,
+                'eficiencia_pastoreo': eficiencia_pastoreo
             }
             
             if sh_configured:
@@ -827,6 +1012,7 @@ def main():
             - ✅ **Actualización diaria**
             - ✅ **Alta resolución** (10m)
             - ✅ **Filtro de nubes** automático
+            - ✅ **Cálculo de EV/ha** integrado
             """)
         else:
             st.success("""
@@ -837,6 +1023,7 @@ def main():
             - 🌿 **NDVI en tiempo real**
             - 📅 **Imágenes históricas**
             - ☁️ **Filtro de nubes** integrado
+            - 🐄 **Cálculo de EV/ha** automático
             
             **Para comenzar:**
             1. Sube tu shapefile
