@@ -20,19 +20,8 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # =============================================================================
-# CONFIGURACIÓN SENTINEL HUB (CON CREDENCIALES AUTOMÁTICAS)
+# CONFIGURACIÓN SENTINEL HUB
 # =============================================================================
-
-# ⚠️ ADVERTENCIA: No uses credenciales hardcodeadas en producción
-# Para desarrollo/testing puedes usar estas, pero en producción usa:
-# - Variables de entorno
-# - Streamlit Secrets (.streamlit/secrets.toml)
-# - Base de datos segura
-
-SENTINEL_HUB_CREDENTIALS = {
-    "client_id": "tu_client_id_aqui",  # 🔒 CAMBIA ESTO
-    "client_secret": "tu_client_secret_aqui"  # 🔒 CAMBIA ESTO
-}
 
 st.set_page_config(
     page_title="🌱 Analizador Forrajero - Sentinel Hub",
@@ -52,11 +41,9 @@ if 'gdf_cargado' not in st.session_state:
     st.session_state.gdf_cargado = None
 if 'sh_configured' not in st.session_state:
     st.session_state.sh_configured = False
-if 'resultados_analisis' not in st.session_state:
-    st.session_state.resultados_analisis = None
 
 # =============================================================================
-# CONFIGURACIÓN SENTINEL HUB AUTOMÁTICA
+# CONFIGURACIÓN SENTINEL HUB (sin credenciales hardcodeadas)
 # =============================================================================
 
 class SentinelHubConfig:
@@ -68,47 +55,20 @@ class SentinelHubConfig:
         self.config_message = ""
         
     def check_configuration(self):
-        """Verifica si Sentinel Hub está configurado - CON CREDENCIALES AUTOMÁTICAS"""
+        """Verifica si Sentinel Hub está configurado"""
         try:
-            # PRIMERO: Verificar si hay credenciales en session state (configuración manual)
+            # Verificar si hay credenciales en session state
             if ('sh_client_id' in st.session_state and 
                 'sh_client_secret' in st.session_state and
                 st.session_state.sh_client_id and 
                 st.session_state.sh_client_secret):
-                
-                st.session_state.sh_configured = True
                 self.available = True
-                self.config_message = "✅ Sentinel Hub configurado (Manual)"
+                self.config_message = "✅ Sentinel Hub configurado"
                 return True
-            
-            # SEGUNDO: Verificar credenciales automáticas
-            elif (SENTINEL_HUB_CREDENTIALS["client_id"] != "tu_client_id_aqui" and
-                  SENTINEL_HUB_CREDENTIALS["client_secret"] != "tu_client_secret_aqui"):
-                
-                # Guardar credenciales automáticas en session state
-                st.session_state.sh_client_id = SENTINEL_HUB_CREDENTIALS["client_id"]
-                st.session_state.sh_client_secret = SENTINEL_HUB_CREDENTIALS["client_secret"]
-                st.session_state.sh_configured = True
-                self.available = True
-                self.config_message = "✅ Sentinel Hub configurado (Automático)"
-                return True
-            
-            # TERCERO: Verificar variables de entorno
-            elif (os.getenv('SENTINEL_HUB_CLIENT_ID') and 
-                  os.getenv('SENTINEL_HUB_CLIENT_SECRET')):
-                
-                st.session_state.sh_client_id = os.getenv('SENTINEL_HUB_CLIENT_ID')
-                st.session_state.sh_client_secret = os.getenv('SENTINEL_HUB_CLIENT_SECRET')
-                st.session_state.sh_configured = True
-                self.available = True
-                self.config_message = "✅ Sentinel Hub configurado (Variables Entorno)"
-                return True
-            
             else:
                 self.available = False
                 self.config_message = "❌ Sentinel Hub no configurado"
                 return False
-                
         except Exception as e:
             self.available = False
             self.config_message = f"❌ Error: {str(e)}"
@@ -200,7 +160,7 @@ class SentinelHubProcessor:
             return 0.5  # Valor por defecto
 
 # =============================================================================
-# MAPAS BASE MEJORADOS (ESRI SATELLITE COMO DEFAULT)
+# MAPAS BASE (igual que antes)
 # =============================================================================
 
 MAPAS_BASE = {
@@ -218,21 +178,11 @@ MAPAS_BASE = {
         "url": "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
         "attribution": "OpenStreetMap contributors",
         "name": "OSM"
-    },
-    "CartoDB Positron": {
-        "url": "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
-        "attribution": "CartoDB",
-        "name": "CartoDB Light"
-    },
-    "CartoDB Dark Matter": {
-        "url": "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-        "attribution": "CartoDB",
-        "name": "CartoDB Dark"
     }
 }
 
 # =============================================================================
-# PARÁMETROS FORRAJEROS MEJORADOS (CON EV/HA)
+# PARÁMETROS FORRAJEROS (igual que antes)
 # =============================================================================
 
 PARAMETROS_FORRAJEROS = {
@@ -243,9 +193,7 @@ PARAMETROS_FORRAJEROS = {
         'TASA_UTILIZACION_RECOMENDADA': 0.65,
         'FACTOR_BIOMASA_NDVI': 2800,
         'UMBRAL_NDVI_SUELO': 0.15,
-        'UMBRAL_NDVI_PASTURA': 0.45,
-        'CONSUMO_DIARIO_EV': 12,  # kg MS/día por animal
-        'EFICIENCIA_PASTOREO': 0.75  # 75% de eficiencia en pastoreo
+        'UMBRAL_NDVI_PASTURA': 0.45
     },
     'RAYGRASS': {
         'MS_POR_HA_OPTIMO': 3500,
@@ -254,9 +202,7 @@ PARAMETROS_FORRAJEROS = {
         'TASA_UTILIZACION_RECOMENDADA': 0.60,
         'FACTOR_BIOMASA_NDVI': 2500,
         'UMBRAL_NDVI_SUELO': 0.18,
-        'UMBRAL_NDVI_PASTURA': 0.50,
-        'CONSUMO_DIARIO_EV': 10,
-        'EFICIENCIA_PASTOREO': 0.70
+        'UMBRAL_NDVI_PASTURA': 0.50
     },
     'FESTUCA': {
         'MS_POR_HA_OPTIMO': 3000,
@@ -265,31 +211,7 @@ PARAMETROS_FORRAJEROS = {
         'TASA_UTILIZACION_RECOMENDADA': 0.55,
         'FACTOR_BIOMASA_NDVI': 2200,
         'UMBRAL_NDVI_SUELO': 0.20,
-        'UMBRAL_NDVI_PASTURA': 0.55,
-        'CONSUMO_DIARIO_EV': 9,
-        'EFICIENCIA_PASTOREO': 0.65
-    },
-    'AGROPIRRO': {
-        'MS_POR_HA_OPTIMO': 3200,
-        'CRECIMIENTO_DIARIO': 55,
-        'CONSUMO_PORCENTAJE_PESO': 0.026,
-        'TASA_UTILIZACION_RECOMENDADA': 0.58,
-        'FACTOR_BIOMASA_NDVI': 2400,
-        'UMBRAL_NDVI_SUELO': 0.17,
-        'UMBRAL_NDVI_PASTURA': 0.52,
-        'CONSUMO_DIARIO_EV': 10,
-        'EFICIENCIA_PASTOREO': 0.68
-    },
-    'PASTIZAL_NATURAL': {
-        'MS_POR_HA_OPTIMO': 2500,
-        'CRECIMIENTO_DIARIO': 40,
-        'CONSUMO_PORCENTAJE_PESO': 0.022,
-        'TASA_UTILIZACION_RECOMENDADA': 0.50,
-        'FACTOR_BIOMASA_NDVI': 2000,
-        'UMBRAL_NDVI_SUELO': 0.22,
-        'UMBRAL_NDVI_PASTURA': 0.48,
-        'CONSUMO_DIARIO_EV': 8,
-        'EFICIENCIA_PASTOREO': 0.60
+        'UMBRAL_NDVI_PASTURA': 0.55
     }
 }
 
@@ -297,247 +219,7 @@ def obtener_parametros(tipo_pastura):
     return PARAMETROS_FORRAJEROS.get(tipo_pastura, PARAMETROS_FORRAJEROS['FESTUCA'])
 
 # =============================================================================
-# FUNCIONES DE CÁLCULO DE EV/HA
-# =============================================================================
-
-def calcular_ev_ha(biomasa_disponible_kg_ms_ha, consumo_diario_ev, eficiencia_pastoreo=0.7):
-    """
-    Calcula Equivalente Vaca por hectárea (EV/ha)
-    
-    Fórmula: EV/ha = (Biomasa disponible kg MS/ha * Eficiencia pastoreo) / Consumo diario EV
-    
-    Donde:
-    - Biomasa disponible: kg MS/ha
-    - Consumo diario EV: kg MS/día por animal (generalmente 10-12 kg)
-    - Eficiencia pastoreo: % de biomasa que realmente consume el animal (0.6-0.8)
-    """
-    if consumo_diario_ev <= 0:
-        return 0
-    
-    ev_ha = (biomasa_disponible_kg_ms_ha * eficiencia_pastoreo) / consumo_diario_ev
-    return max(0, ev_ha)  # No valores negativos
-
-def calcular_carga_animal_total(ev_ha, area_ha):
-    """
-    Calcula la carga animal total para un área
-    """
-    return ev_ha * area_ha
-
-def clasificar_capacidad_carga(ev_ha):
-    """
-    Clasifica la capacidad de carga según EV/ha
-    """
-    if ev_ha < 0.5:
-        return "MUY BAJA", "#FF6B6B"
-    elif ev_ha < 1.0:
-        return "BAJA", "#FFA726"
-    elif ev_ha < 1.5:
-        return "MODERADA", "#FFD54F"
-    elif ev_ha < 2.0:
-        return "ALTA", "#AED581"
-    else:
-        return "MUY ALTA", "#66BB6A"
-
-# =============================================================================
-# FUNCIONES DE VISUALIZACIÓN DE MAPAS CORREGIDAS
-# =============================================================================
-
-def crear_mapa_base(gdf, mapa_seleccionado="ESRI World Imagery", zoom_start=12):
-    """Crea un mapa base con el estilo seleccionado - ESRI SATELLITE COMO DEFAULT"""
-    
-    # Calcular centro del mapa
-    bounds = gdf.total_bounds
-    center_lat = (bounds[1] + bounds[3]) / 2
-    center_lon = (bounds[0] + bounds[2]) / 2
-    
-    # Crear mapa
-    m = folium.Map(
-        location=[center_lat, center_lon],
-        zoom_start=zoom_start,
-        tiles=None,
-        control_scale=True
-    )
-    
-    # Añadir TODAS las capas base pero marcar la seleccionada como activa
-    for nombre, config in MAPAS_BASE.items():
-        folium.TileLayer(
-            tiles=config["url"],
-            attr=config["attribution"],
-            name=config["name"],
-            control=True,
-            show=(nombre == mapa_seleccionado)  # SOLO el seleccionado se muestra por defecto
-        ).add_to(m)
-    
-    return m
-
-def agregar_capa_poligonos(mapa, gdf, nombre_capa, color='blue', fill_opacity=0.3):
-    """Agrega una capa de polígonos al mapa - VERSIÓN CORREGIDA"""
-    
-    def estilo_poligono(feature):
-        return {
-            'fillColor': color,
-            'color': 'black',
-            'weight': 2,
-            'fillOpacity': fill_opacity,
-            'opacity': 0.8
-        }
-    
-    # Verificar qué campos están disponibles para el tooltip
-    available_fields = []
-    available_aliases = []
-    
-    # Campos comunes que podrían estar en el GeoDataFrame
-    possible_fields = ['id_subLote', 'id', 'nombre', 'name', 'area_ha', 'ndvi', 'ev_ha']
-    
-    for field in possible_fields:
-        if field in gdf.columns:
-            available_fields.append(field)
-            if field == 'id_subLote':
-                available_aliases.append('Sub-Lote:')
-            elif field == 'id':
-                available_aliases.append('ID:')
-            elif field == 'nombre':
-                available_aliases.append('Nombre:')
-            elif field == 'name':
-                available_aliases.append('Name:')
-            elif field == 'area_ha':
-                available_aliases.append('Área (ha):')
-            elif field == 'ndvi':
-                available_aliases.append('NDVI:')
-            elif field == 'ev_ha':
-                available_aliases.append('EV/ha:')
-    
-    # Si no hay campos específicos, usar un tooltip genérico
-    if not available_fields:
-        tooltip = folium.GeoJsonTooltip(
-            fields=[],
-            aliases=[],
-            localize=True
-        )
-    else:
-        tooltip = folium.GeoJsonTooltip(
-            fields=available_fields,
-            aliases=available_aliases,
-            localize=True
-        )
-    
-    folium.GeoJson(
-        gdf.__geo_interface__,
-        name=nombre_capa,
-        style_function=estilo_poligono,
-        tooltip=tooltip
-    ).add_to(mapa)
-
-def crear_mapa_ndvi(gdf_resultados, mapa_base="ESRI World Imagery"):
-    """Crea un mapa con visualización de NDVI"""
-    
-    m = crear_mapa_base(gdf_resultados, mapa_base, zoom_start=12)
-    
-    # Función para determinar color basado en NDVI
-    def estilo_ndvi(feature):
-        ndvi = feature['properties']['ndvi']
-        if ndvi < 0.2:
-            color = '#8B4513'  # Marrón - suelo desnudo
-        elif ndvi < 0.4:
-            color = '#FFD700'  # Amarillo - vegetación escasa
-        elif ndvi < 0.6:
-            color = '#32CD32'  # Verde claro - vegetación moderada
-        else:
-            color = '#006400'  # Verde oscuro - vegetación densa
-        
-        return {
-            'fillColor': color,
-            'color': 'black',
-            'weight': 1,
-            'fillOpacity': 0.7,
-            'opacity': 0.8
-        }
-    
-    # Agregar capa de NDVI
-    folium.GeoJson(
-        gdf_resultados.__geo_interface__,
-        name='NDVI por Sub-Lote',
-        style_function=estilo_ndvi,
-        tooltip=folium.GeoJsonTooltip(
-            fields=['id_subLote', 'ndvi', 'area_ha', 'biomasa_kg_ms_ha', 'ev_ha'],
-            aliases=['Sub-Lote:', 'NDVI:', 'Área (ha):', 'Biomasa (kg MS/ha):', 'EV/ha:'],
-            localize=True
-        )
-    ).add_to(m)
-    
-    # Agregar leyenda de NDVI
-    legend_html = '''
-    <div style="position: fixed; 
-                bottom: 50px; left: 50px; width: 220px; height: 160px; 
-                background-color: white; border:2px solid grey; z-index:9999; 
-                font-size:14px; padding: 10px; border-radius: 5px;">
-    <p style="margin:0; font-weight:bold;">🌿 Leyenda NDVI</p>
-    <p style="margin:2px 0;"><i style="background:#8B4513; width:20px; height:20px; display:inline-block; margin-right:5px; border:1px solid black"></i> < 0.2 (Suelo)</p>
-    <p style="margin:2px 0;"><i style="background:#FFD700; width:20px; height:20px; display:inline-block; margin-right:5px; border:1px solid black"></i> 0.2-0.4 (Escasa)</p>
-    <p style="margin:2px 0;"><i style="background:#32CD32; width:20px; height:20px; display:inline-block; margin-right:5px; border:1px solid black"></i> 0.4-0.6 (Moderada)</p>
-    <p style="margin:2px 0;"><i style="background:#006400; width:20px; height:20px; display:inline-block; margin-right:5px; border:1px solid black"></i> > 0.6 (Densa)</p>
-    </div>
-    '''
-    m.get_root().html.add_child(folium.Element(legend_html))
-    
-    # Control de capas
-    folium.LayerControl().add_to(m)
-    
-    return m
-
-def crear_mapa_ev_ha(gdf_resultados, mapa_base="ESRI World Imagery"):
-    """Crea un mapa con visualización de EV/ha"""
-    
-    m = crear_mapa_base(gdf_resultados, mapa_base, zoom_start=12)
-    
-    # Función para determinar color basado en EV/ha
-    def estilo_ev_ha(feature):
-        ev_ha = feature['properties']['ev_ha']
-        clasificacion, color = clasificar_capacidad_carga(ev_ha)
-        
-        return {
-            'fillColor': color,
-            'color': 'black',
-            'weight': 1,
-            'fillOpacity': 0.7,
-            'opacity': 0.8
-        }
-    
-    # Agregar capa de EV/ha
-    folium.GeoJson(
-        gdf_resultados.__geo_interface__,
-        name='EV/ha por Sub-Lote',
-        style_function=estilo_ev_ha,
-        tooltip=folium.GeoJsonTooltip(
-            fields=['id_subLote', 'ev_ha', 'area_ha', 'biomasa_kg_ms_ha', 'carga_animal'],
-            aliases=['Sub-Lote:', 'EV/ha:', 'Área (ha):', 'Biomasa (kg MS/ha):', 'Carga Animal:'],
-            localize=True
-        )
-    ).add_to(m)
-    
-    # Agregar leyenda de EV/ha
-    legend_html = '''
-    <div style="position: fixed; 
-                bottom: 50px; left: 50px; width: 240px; height: 180px; 
-                background-color: white; border:2px solid grey; z-index:9999; 
-                font-size:14px; padding: 10px; border-radius: 5px;">
-    <p style="margin:0; font-weight:bold;">🐄 Capacidad de Carga (EV/ha)</p>
-    <p style="margin:2px 0;"><i style="background:#FF6B6B; width:20px; height:20px; display:inline-block; margin-right:5px; border:1px solid black"></i> < 0.5 (Muy Baja)</p>
-    <p style="margin:2px 0;"><i style="background:#FFA726; width:20px; height:20px; display:inline-block; margin-right:5px; border:1px solid black"></i> 0.5-1.0 (Baja)</p>
-    <p style="margin:2px 0;"><i style="background:#FFD54F; width:20px; height:20px; display:inline-block; margin-right:5px; border:1px solid black"></i> 1.0-1.5 (Moderada)</p>
-    <p style="margin:2px 0;"><i style="background:#AED581; width:20px; height:20px; display:inline-block; margin-right:5px; border:1px solid black"></i> 1.5-2.0 (Alta)</p>
-    <p style="margin:2px 0;"><i style="background:#66BB6A; width:20px; height:20px; display:inline-block; margin-right:5px; border:1px solid black"></i> > 2.0 (Muy Alta)</p>
-    </div>
-    '''
-    m.get_root().html.add_child(folium.Element(legend_html))
-    
-    # Control de capas
-    folium.LayerControl().add_to(m)
-    
-    return m
-
-# =============================================================================
-# FUNCIONES BÁSICAS
+# FUNCIONES BÁSICAS (igual que antes)
 # =============================================================================
 
 def calcular_superficie(gdf):
@@ -596,17 +278,16 @@ def dividir_potrero(gdf, n_zonas):
         return gdf
 
 # =============================================================================
-# SIDEBAR CON CONFIGURACIÓN SENTINEL HUB MEJORADA
+# SIDEBAR CON CONFIGURACIÓN SENTINEL HUB
 # =============================================================================
 
 with st.sidebar:
     st.header("⚙️ Configuración")
     
-    # Configuración Sentinel Hub - SOLO SI NO ESTÁ CONFIGURADO
+    # Configuración Sentinel Hub
     st.subheader("🛰️ Sentinel Hub")
     
     if not sh_configured:
-        st.error("❌ Sentinel Hub no configurado")
         with st.expander("🔐 Configurar Sentinel Hub", expanded=True):
             st.markdown("""
             **Para usar Sentinel Hub real necesitas:**
@@ -633,13 +314,8 @@ with st.sidebar:
             **📝 Nota:** Las credenciales se guardan solo en esta sesión.
             """)
     else:
-        st.success(sh_config.config_message)
+        st.success("✅ Sentinel Hub configurado")
         if st.button("🔄 Cambiar Credenciales"):
-            # Limpiar credenciales
-            if 'sh_client_id' in st.session_state:
-                del st.session_state.sh_client_id
-            if 'sh_client_secret' in st.session_state:
-                del st.session_state.sh_client_secret
             st.session_state.sh_configured = False
             st.rerun()
     
@@ -647,7 +323,7 @@ with st.sidebar:
     mapa_base = st.selectbox(
         "Seleccionar mapa base:",
         list(MAPAS_BASE.keys()),
-        index=0  # ESRI World Imagery como default
+        index=0
     )
     
     st.subheader("📅 Configuración Temporal")
@@ -666,34 +342,15 @@ with st.sidebar:
     st.subheader("📐 División del Potrero")
     n_divisiones = st.slider("Número de sub-lotes:", 8, 32, 16)
     
-    st.subheader("🐄 Configuración EV")
-    consumo_diario_personalizado = st.number_input(
-        "Consumo diario por EV (kg MS):", 
-        min_value=8.0, 
-        max_value=15.0, 
-        value=10.0, 
-        step=0.5,
-        help="Consumo promedio de materia seca por animal por día"
-    )
-    
-    eficiencia_pastoreo = st.slider(
-        "Eficiencia de pastoreo (%):", 
-        min_value=50, 
-        max_value=90, 
-        value=70, 
-        step=5,
-        help="Porcentaje de biomasa que realmente consume el animal"
-    ) / 100.0
-    
     st.subheader("📤 Cargar Datos")
     uploaded_zip = st.file_uploader("Subir shapefile (ZIP):", type=['zip'])
 
 # =============================================================================
-# ANÁLISIS CON SENTINEL HUB Y EV/HA
+# ANÁLISIS CON SENTINEL HUB
 # =============================================================================
 
 def analisis_con_sentinel_hub(gdf, config):
-    """Análisis usando Sentinel Hub real con cálculo de EV/ha"""
+    """Análisis usando Sentinel Hub real"""
     try:
         st.header("🌱 ANÁLISIS FORRAJERO - SENTINEL HUB")
         
@@ -746,15 +403,7 @@ def analisis_con_sentinel_hub(gdf, config):
             # Calcular biomasa
             params = obtener_parametros(config['tipo_pastura'])
             biomasa_total = params['FACTOR_BIOMASA_NDVI'] * ndvi if ndvi else 0
-            biomasa_disponible = biomasa_total * params['TASA_UTILIZACION_RECOMENDADA']
-            
-            # Calcular EV/ha - usar valor personalizado o el de los parámetros
-            consumo_diario = config.get('consumo_diario_personalizado', params['CONSUMO_DIARIO_EV'])
-            eficiencia = config.get('eficiencia_pastoreo', params['EFICIENCIA_PASTOREO'])
-            
-            ev_ha = calcular_ev_ha(biomasa_disponible, consumo_diario, eficiencia)
-            carga_animal = calcular_carga_animal_total(ev_ha, area_ha)
-            clasificacion_ev, color_ev = clasificar_capacidad_carga(ev_ha)
+            biomasa_disponible = biomasa_total * 0.6
             
             # Clasificar vegetación
             if ndvi is None:
@@ -776,37 +425,29 @@ def analisis_con_sentinel_hub(gdf, config):
                 'ndvi': ndvi,
                 'tipo_superficie': tipo_veg,
                 'biomasa_kg_ms_ha': biomasa_disponible,
-                'ev_ha': ev_ha,
-                'carga_animal': carga_animal,
-                'clasificacion_carga': clasificacion_ev,
-                'color_carga': color_ev,
                 'fuente': fuente
             })
         
         progress_bar.empty()
         
-        # Añadir resultados al GeoDataFrame
-        for col in ['area_ha', 'ndvi', 'tipo_superficie', 'biomasa_kg_ms_ha', 'ev_ha', 
-                   'carga_animal', 'clasificacion_carga', 'color_carga', 'fuente']:
-            gdf_dividido[col] = [r[col] for r in resultados]
-        
-        # Guardar en session state
-        st.session_state.resultados_analisis = gdf_dividido
-        
         # Mostrar resultados
-        mostrar_resultados_sentinel_hub(gdf_dividido, config)
+        mostrar_resultados_sentinel_hub(gdf_dividido, resultados, config)
         return True
         
     except Exception as e:
         st.error(f"Error en análisis: {e}")
         return False
 
-def mostrar_resultados_sentinel_hub(gdf, config):
-    """Muestra resultados con Sentinel Hub incluyendo EV/ha"""
+def mostrar_resultados_sentinel_hub(gdf, resultados, config):
+    """Muestra resultados con Sentinel Hub"""
     st.header("📊 RESULTADOS - SENTINEL HUB")
     
-    # Métricas principales
-    col1, col2, col3, col4, col5 = st.columns(5)
+    # Añadir resultados al GeoDataFrame
+    for col in ['area_ha', 'ndvi', 'tipo_superficie', 'biomasa_kg_ms_ha', 'fuente']:
+        gdf[col] = [r[col] for r in resultados]
+    
+    # Métricas
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         ndvi_prom = gdf['ndvi'].mean()
@@ -817,116 +458,28 @@ def mostrar_resultados_sentinel_hub(gdf, config):
         st.metric("Biomasa Promedio", f"{biomasa_prom:.0f} kg MS/ha")
     
     with col3:
-        ev_ha_prom = gdf['ev_ha'].mean()
-        st.metric("EV/ha Promedio", f"{ev_ha_prom:.1f}")
-    
-    with col4:
         area_total = gdf['area_ha'].sum()
         st.metric("Área Total", f"{area_total:.1f} ha")
     
-    with col5:
-        carga_total = gdf['carga_animal'].sum()
-        st.metric("Carga Animal Total", f"{carga_total:.0f} EV")
-    
-    # VISUALIZACIÓN DE MAPAS
-    st.header("🗺️ VISUALIZACIÓN EN MAPA")
-    
-    # Selección de tipo de mapa
-    col_map1, col_map2 = st.columns(2)
-    with col_map1:
-        tipo_mapa = st.selectbox(
-            "Tipo de visualización:",
-            ["NDVI por Sub-Lote", "EV/ha por Sub-Lote", "Potrero Original", "Comparación"]
-        )
-    with col_map2:
-        mapa_base_seleccionado = st.selectbox(
-            "Mapa base:",
-            list(MAPAS_BASE.keys()),
-            index=0
-        )
-    
-    # Crear mapa según selección
-    if tipo_mapa == "NDVI por Sub-Lote":
-        st.subheader("🌿 MAPA DE NDVI")
-        with st.spinner("Generando mapa..."):
-            mapa_ndvi = crear_mapa_ndvi(gdf, mapa_base_seleccionado)
-            folium_static(mapa_ndvi, width=800, height=400)
-    
-    elif tipo_mapa == "EV/ha por Sub-Lote":
-        st.subheader("🐄 MAPA DE EV/HA")
-        with st.spinner("Generando mapa..."):
-            mapa_ev = crear_mapa_ev_ha(gdf, mapa_base_seleccionado)
-            folium_static(mapa_ev, width=800, height=400)
-    
-    elif tipo_mapa == "Potrero Original":
-        st.subheader("🗺️ POTRERO ORIGINAL")
-        with st.spinner("Generando mapa..."):
-            mapa_original = crear_mapa_base(st.session_state.gdf_cargado, mapa_base_seleccionado, zoom_start=12)
-            agregar_capa_poligonos(mapa_original, st.session_state.gdf_cargado, "Potrero Original", 'blue', 0.5)
-            folium_static(mapa_original, width=800, height=400)
-    
-    elif tipo_mapa == "Comparación":
-        st.subheader("🔍 COMPARACIÓN: ORIGINAL VS SUB-LOTES")
-        col_comp1, col_comp2 = st.columns(2)
-        
-        with col_comp1:
-            st.markdown("**Potrero Original**")
-            mapa_orig = crear_mapa_base(st.session_state.gdf_cargado, mapa_base_seleccionado, zoom_start=12)
-            agregar_capa_poligonos(mapa_orig, st.session_state.gdf_cargado, "Original", 'blue', 0.5)
-            folium_static(mapa_orig, height=300)
-        
-        with col_comp2:
-            st.markdown("**Sub-Lotes con EV/ha**")
-            mapa_sublotes = crear_mapa_ev_ha(gdf, mapa_base_seleccionado)
-            folium_static(mapa_sublotes, height=300)
+    with col4:
+        datos_reales = len(gdf[gdf['fuente'] == 'SENTINEL_HUB'])
+        st.metric("Datos Reales", f"{datos_reales}/{len(gdf)}")
     
     # Tabla de resultados
-    st.header("📋 DETALLES POR SUB-LOTE")
-    tabla = gdf[['id_subLote', 'area_ha', 'tipo_superficie', 'ndvi', 'biomasa_kg_ms_ha', 'ev_ha', 'carga_animal', 'clasificacion_carga']].copy()
-    tabla.columns = ['Sub-Lote', 'Área (ha)', 'Tipo Superficie', 'NDVI', 'Biomasa (kg MS/ha)', 'EV/ha', 'Carga Animal', 'Clasificación']
+    st.subheader("📋 DETALLES POR SUB-LOTE")
+    tabla = gdf[['id_subLote', 'area_ha', 'tipo_superficie', 'ndvi', 'biomasa_kg_ms_ha', 'fuente']].copy()
+    tabla.columns = ['Sub-Lote', 'Área (ha)', 'Tipo Superficie', 'NDVI', 'Biomasa (kg MS/ha)', 'Fuente']
     st.dataframe(tabla, use_container_width=True)
     
-    # Resumen de capacidad de carga
-    st.header("🐄 RESUMEN DE CAPACIDAD DE CARGA")
-    
-    # Distribución de clasificaciones
-    distribucion = gdf['clasificacion_carga'].value_counts()
-    
-    col_carga1, col_carga2, col_carga3 = st.columns(3)
-    
-    with col_carga1:
-        st.metric("Capacidad Media", f"{gdf['ev_ha'].mean():.1f} EV/ha")
-    
-    with col_carga2:
-        st.metric("Carga Total Potencial", f"{gdf['carga_animal'].sum():.0f} EV")
-    
-    with col_carga3:
-        st.metric("Sub-Lotes con Alta Capacidad", 
-                 f"{len(gdf[gdf['clasificacion_carga'].isin(['ALTA', 'MUY ALTA'])])}/{len(gdf)}")
-    
     # Descarga
-    st.header("💾 EXPORTAR RESULTADOS")
-    col_dl1, col_dl2 = st.columns(2)
-    
-    with col_dl1:
-        # CSV
-        csv = tabla.to_csv(index=False)
-        st.download_button(
-            "📥 Descargar CSV",
-            csv,
-            f"resultados_sentinel_hub_{config['tipo_pastura']}.csv",
-            "text/csv"
-        )
-    
-    with col_dl2:
-        # GeoJSON
-        geojson = gdf.to_json()
-        st.download_button(
-            "📥 Descargar GeoJSON",
-            geojson,
-            f"resultados_sentinel_hub_{config['tipo_pastura']}.geojson",
-            "application/json"
-        )
+    st.subheader("💾 EXPORTAR RESULTADOS")
+    csv = tabla.to_csv(index=False)
+    st.download_button(
+        "📥 Descargar CSV",
+        csv,
+        f"resultados_sentinel_hub_{config['tipo_pastura']}.csv",
+        "text/csv"
+    )
 
 # =============================================================================
 # INTERFAZ PRINCIPAL
@@ -971,20 +524,11 @@ def main():
             fuente = "SENTINEL HUB" if sh_configured else "SIMULADO"
             st.metric("Fuente Datos", fuente)
         
-        # Mapa rápido del shapefile cargado
-        st.subheader("🗺️ VISTA PREVIA DEL POTRERO")
-        with st.spinner("Cargando mapa..."):
-            mapa_preview = crear_mapa_base(gdf, mapa_base, zoom_start=11)
-            agregar_capa_poligonos(mapa_preview, gdf, "Potrero Cargado", 'red', 0.5)
-            folium_static(mapa_preview, width=800, height=300)
-        
         if st.button("🚀 EJECUTAR ANÁLISIS SENTINEL HUB", type="primary"):
             config = {
                 'fecha_imagen': fecha_imagen,
                 'tipo_pastura': tipo_pastura,
-                'n_divisiones': n_divisiones,
-                'consumo_diario_personalizado': consumo_diario_personalizado,
-                'eficiencia_pastoreo': eficiencia_pastoreo
+                'n_divisiones': n_divisiones
             }
             
             if sh_configured:
@@ -1012,7 +556,6 @@ def main():
             - ✅ **Actualización diaria**
             - ✅ **Alta resolución** (10m)
             - ✅ **Filtro de nubes** automático
-            - ✅ **Cálculo de EV/ha** integrado
             """)
         else:
             st.success("""
@@ -1023,7 +566,6 @@ def main():
             - 🌿 **NDVI en tiempo real**
             - 📅 **Imágenes históricas**
             - ☁️ **Filtro de nubes** integrado
-            - 🐄 **Cálculo de EV/ha** automático
             
             **Para comenzar:**
             1. Sube tu shapefile
