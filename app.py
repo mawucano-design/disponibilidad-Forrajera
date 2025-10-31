@@ -325,31 +325,31 @@ def calcular_carga_animal_total(ev_ha, area_ha):
 
 def get_color_ev_ha(ev_ha):
     """Obtiene color en gradiente para EV/ha"""
-    # Gradiente de rojo (bajo) a verde (alto)
+    # Gradiente exacto según la especificación
     if ev_ha < 0.5:
-        return '#FF6B6B'  # Rojo - Muy baja
+        return '#FF6B6B'  # 🔴 Rojo - Muy baja
     elif ev_ha < 1.0:
-        return '#FFA726'  # Naranja - Baja
+        return '#FFA726'  # 🟠 Naranja - Baja
     elif ev_ha < 1.5:
-        return '#FFD54F'  # Amarillo - Moderada
+        return '#FFD54F'  # 🟡 Amarillo - Moderada
     elif ev_ha < 2.0:
-        return '#AED581'  # Verde claro - Alta
+        return '#AED581'  # 🟢 Verde claro - Alta
     else:
-        return '#66BB6A'  # Verde - Muy alta
+        return '#66BB6A'  # 🟢 Verde oscuro - Muy alta
 
 def get_color_biomasa(biomasa_kg_ms_ha):
     """Obtiene color en gradiente para biomasa"""
-    # Gradiente de rojo (bajo) a verde (alto)
+    # Gradiente exacto según la especificación
     if biomasa_kg_ms_ha < 1000:
-        return '#FF6B6B'  # Rojo - Muy baja
+        return '#FF6B6B'  # 🔴 Rojo - Muy baja
     elif biomasa_kg_ms_ha < 2000:
-        return '#FFA726'  # Naranja - Baja
+        return '#FFA726'  # 🟠 Naranja - Baja
     elif biomasa_kg_ms_ha < 3000:
-        return '#FFD54F'  # Amarillo - Moderada
+        return '#FFD54F'  # 🟡 Amarillo - Moderada
     elif biomasa_kg_ms_ha < 4000:
-        return '#AED581'  # Verde claro - Alta
+        return '#AED581'  # 🟢 Verde claro - Alta
     else:
-        return '#66BB6A'  # Verde - Muy alta
+        return '#66BB6A'  # 🟢 Verde oscuro - Muy alta
 
 def get_color_ndvi(ndvi):
     """Obtiene color en gradiente para NDVI"""
@@ -364,7 +364,7 @@ def get_color_ndvi(ndvi):
         return '#006400'  # Verde oscuro - Vegetación densa
 
 # =============================================================================
-# FUNCIONES DE VISUALIZACIÓN DE MAPAS MEJORADAS CON LEYENDAS DE GRADIENTE
+# FUNCIONES DE VISUALIZACIÓN DE MAPAS MEJORADAS CON GRADIENTES CORRECTOS
 # =============================================================================
 
 def crear_mapa_base(gdf, mapa_seleccionado="ESRI World Imagery", zoom_start=14):
@@ -401,30 +401,30 @@ def crear_leyenda_gradiente(titulo, colores, valores, unidades=""):
     
     leyenda_html = f'''
     <div style="position: fixed; 
-                top: 10px; right: 10px; width: 220px; 
+                top: 10px; right: 10px; width: 250px; 
                 background-color: white; border:2px solid grey; z-index:9999; 
                 font-size:12px; padding: 10px; border-radius: 5px;
                 box-shadow: 0 0 10px rgba(0,0,0,0.2);">
         <div style="font-weight: bold; margin-bottom: 8px; text-align: center; font-size: 14px;">
             {titulo}
         </div>
-        <div style="display: flex; flex-direction: column; gap: 2px;">
+        <div style="display: flex; flex-direction: column; gap: 4px;">
     '''
     
-    # Crear barras de gradiente para cada rango
+    # Crear barras de color para cada rango
     for i in range(len(colores)):
         if i < len(valores) - 1:
             leyenda_html += f'''
             <div style="display: flex; align-items: center; justify-content: space-between;">
-                <div style="width: 20px; height: 15px; background: {colores[i]}; border: 1px solid #000;"></div>
-                <span style="margin-left: 8px; flex-grow: 1;">{valores[i]} - {valores[i+1]}{unidades}</span>
+                <div style="width: 25px; height: 18px; background: {colores[i]}; border: 1px solid #000; margin-right: 10px;"></div>
+                <span style="flex-grow: 1;">{valores[i]} - {valores[i+1]}{unidades}</span>
             </div>
             '''
         else:
             leyenda_html += f'''
             <div style="display: flex; align-items: center; justify-content: space-between;">
-                <div style="width: 20px; height: 15px; background: {colores[i]}; border: 1px solid #000;"></div>
-                <span style="margin-left: 8px; flex-grow: 1;">>{valores[i]}{unidades}</span>
+                <div style="width: 25px; height: 18px; background: {colores[i]}; border: 1px solid #000; margin-right: 10px;"></div>
+                <span style="flex-grow: 1;">> {valores[i]}{unidades}</span>
             </div>
             '''
     
@@ -441,6 +441,9 @@ def crear_mapa_ndvi(gdf_resultados, mapa_base="ESRI World Imagery"):
     
     # Función para determinar color basado en NDVI
     def estilo_ndvi(feature):
+        if feature['properties']['ndvi'] is None:
+            return {'fillColor': 'gray', 'color': 'black', 'weight': 1, 'fillOpacity': 0.3, 'opacity': 0.8}
+        
         ndvi = feature['properties']['ndvi']
         color = get_color_ndvi(ndvi)
         
@@ -467,7 +470,7 @@ def crear_mapa_ndvi(gdf_resultados, mapa_base="ESRI World Imagery"):
     
     # Leyenda de NDVI con gradiente
     colores_ndvi = ['#8B4513', '#FFD700', '#32CD32', '#006400']
-    valores_ndvi = [0.0, 0.2, 0.4, 0.6]
+    valores_ndvi = ['0.0', '0.2', '0.4', '0.6']
     leyenda_ndvi = crear_leyenda_gradiente("🌿 Índice NDVI", colores_ndvi, valores_ndvi)
     m.get_root().html.add_child(folium.Element(leyenda_ndvi))
     
@@ -483,6 +486,9 @@ def crear_mapa_ev_ha(gdf_resultados, mapa_base="ESRI World Imagery"):
     
     # Función para determinar color basado en EV/ha
     def estilo_ev_ha(feature):
+        if feature['properties']['ev_ha'] is None:
+            return {'fillColor': 'gray', 'color': 'black', 'weight': 1, 'fillOpacity': 0.3, 'opacity': 0.8}
+        
         ev_ha = feature['properties']['ev_ha']
         color = get_color_ev_ha(ev_ha)
         
@@ -507,9 +513,9 @@ def crear_mapa_ev_ha(gdf_resultados, mapa_base="ESRI World Imagery"):
         )
     ).add_to(m)
     
-    # Leyenda de EV/ha con gradiente
+    # Leyenda de EV/ha con gradiente EXACTO según especificación
     colores_ev = ['#FF6B6B', '#FFA726', '#FFD54F', '#AED581', '#66BB6A']
-    valores_ev = [0.0, 0.5, 1.0, 1.5, 2.0]
+    valores_ev = ['0.0', '0.5', '1.0', '1.5', '2.0']
     leyenda_ev = crear_leyenda_gradiente("🐄 Capacidad de Carga (EV/ha)", colores_ev, valores_ev)
     m.get_root().html.add_child(folium.Element(leyenda_ev))
     
@@ -525,6 +531,9 @@ def crear_mapa_biomasa(gdf_resultados, mapa_base="ESRI World Imagery"):
     
     # Función para determinar color basado en biomasa
     def estilo_biomasa(feature):
+        if feature['properties']['biomasa_kg_ms_ha'] is None:
+            return {'fillColor': 'gray', 'color': 'black', 'weight': 1, 'fillOpacity': 0.3, 'opacity': 0.8}
+        
         biomasa = feature['properties']['biomasa_kg_ms_ha']
         color = get_color_biomasa(biomasa)
         
@@ -549,9 +558,9 @@ def crear_mapa_biomasa(gdf_resultados, mapa_base="ESRI World Imagery"):
         )
     ).add_to(m)
     
-    # Leyenda de Biomasa con gradiente
+    # Leyenda de Biomasa con gradiente EXACTO según especificación
     colores_biomasa = ['#FF6B6B', '#FFA726', '#FFD54F', '#AED581', '#66BB6A']
-    valores_biomasa = [0, 1000, 2000, 3000, 4000]
+    valores_biomasa = ['0', '1,000', '2,000', '3,000', '4,000']
     leyenda_biomasa = crear_leyenda_gradiente("🌿 Biomasa Forrajera (kg MS/ha)", colores_biomasa, valores_biomasa)
     m.get_root().html.add_child(folium.Element(leyenda_biomasa))
     
