@@ -20,8 +20,19 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # =============================================================================
-# CONFIGURACIÓN SENTINEL HUB
+# CONFIGURACIÓN SENTINEL HUB (CON CREDENCIALES AUTOMÁTICAS)
 # =============================================================================
+
+# ⚠️ ADVERTENCIA: No uses credenciales hardcodeadas en producción
+# Para desarrollo/testing puedes usar estas, pero en producción usa:
+# - Variables de entorno
+# - Streamlit Secrets (.streamlit/secrets.toml)
+# - Base de datos segura
+
+SENTINEL_HUB_CREDENTIALS = {
+    "client_id": "tu_client_id_aqui",  # 🔒 CAMBIA ESTO
+    "client_secret": "tu_client_secret_aqui"  # 🔒 CAMBIA ESTO
+}
 
 st.set_page_config(
     page_title="🌱 Analizador Forrajero - Sentinel Hub",
@@ -45,7 +56,7 @@ if 'resultados_analisis' not in st.session_state:
     st.session_state.resultados_analisis = None
 
 # =============================================================================
-# CONFIGURACIÓN SENTINEL HUB (sin credenciales hardcodeadas)
+# CONFIGURACIÓN SENTINEL HUB AUTOMÁTICA
 # =============================================================================
 
 class SentinelHubConfig:
@@ -57,20 +68,47 @@ class SentinelHubConfig:
         self.config_message = ""
         
     def check_configuration(self):
-        """Verifica si Sentinel Hub está configurado"""
+        """Verifica si Sentinel Hub está configurado - CON CREDENCIALES AUTOMÁTICAS"""
         try:
-            # Verificar si hay credenciales en session state
+            # PRIMERO: Verificar si hay credenciales en session state (configuración manual)
             if ('sh_client_id' in st.session_state and 
                 'sh_client_secret' in st.session_state and
                 st.session_state.sh_client_id and 
                 st.session_state.sh_client_secret):
+                
+                st.session_state.sh_configured = True
                 self.available = True
-                self.config_message = "✅ Sentinel Hub configurado"
+                self.config_message = "✅ Sentinel Hub configurado (Manual)"
                 return True
+            
+            # SEGUNDO: Verificar credenciales automáticas
+            elif (SENTINEL_HUB_CREDENTIALS["client_id"] != "tu_client_id_aqui" and
+                  SENTINEL_HUB_CREDENTIALS["client_secret"] != "tu_client_secret_aqui"):
+                
+                # Guardar credenciales automáticas en session state
+                st.session_state.sh_client_id = SENTINEL_HUB_CREDENTIALS["client_id"]
+                st.session_state.sh_client_secret = SENTINEL_HUB_CREDENTIALS["client_secret"]
+                st.session_state.sh_configured = True
+                self.available = True
+                self.config_message = "✅ Sentinel Hub configurado (Automático)"
+                return True
+            
+            # TERCERO: Verificar variables de entorno
+            elif (os.getenv('SENTINEL_HUB_CLIENT_ID') and 
+                  os.getenv('SENTINEL_HUB_CLIENT_SECRET')):
+                
+                st.session_state.sh_client_id = os.getenv('SENTINEL_HUB_CLIENT_ID')
+                st.session_state.sh_client_secret = os.getenv('SENTINEL_HUB_CLIENT_SECRET')
+                st.session_state.sh_configured = True
+                self.available = True
+                self.config_message = "✅ Sentinel Hub configurado (Variables Entorno)"
+                return True
+            
             else:
                 self.available = False
                 self.config_message = "❌ Sentinel Hub no configurado"
                 return False
+                
         except Exception as e:
             self.available = False
             self.config_message = f"❌ Error: {str(e)}"
@@ -162,7 +200,7 @@ class SentinelHubProcessor:
             return 0.5  # Valor por defecto
 
 # =============================================================================
-# MAPAS BASE MEJORADOS
+# MAPAS BASE MEJORADOS (ESRI SATELLITE COMO DEFAULT)
 # =============================================================================
 
 MAPAS_BASE = {
@@ -197,8 +235,8 @@ MAPAS_BASE = {
 # FUNCIONES DE VISUALIZACIÓN DE MAPAS CORREGIDAS
 # =============================================================================
 
-def crear_mapa_base(gdf, mapa_seleccionado="ESRI World Imagery", zoom_start=14):
-    """Crea un mapa base con el estilo seleccionado"""
+def crear_mapa_base(gdf, mapa_seleccionado="ESRI World Imagery", zoom_start=12):
+    """Crea un mapa base con el estilo seleccionado - ESRI SATELLITE COMO DEFAULT"""
     
     # Calcular centro del mapa
     bounds = gdf.total_bounds
@@ -213,24 +251,15 @@ def crear_mapa_base(gdf, mapa_seleccionado="ESRI World Imagery", zoom_start=14):
         control_scale=True
     )
     
-    # Añadir capa base seleccionada
-    mapa_config = MAPAS_BASE[mapa_seleccionado]
-    folium.TileLayer(
-        tiles=mapa_config["url"],
-        attr=mapa_config["attribution"],
-        name=mapa_config["name"],
-        control=True
-    ).add_to(m)
-    
-    # Añadir otras capas base como opciones
+    # Añadir TODAS las capas base pero marcar la seleccionada como activa
     for nombre, config in MAPAS_BASE.items():
-        if nombre != mapa_seleccionado:
-            folium.TileLayer(
-                tiles=config["url"],
-                attr=config["attribution"],
-                name=config["name"],
-                control=True
-            ).add_to(m)
+        folium.TileLayer(
+            tiles=config["url"],
+            attr=config["attribution"],
+            name=config["name"],
+            control=True,
+            show=(nombre == mapa_seleccionado)  # SOLO el seleccionado se muestra por defecto
+        ).add_to(m)
     
     return m
 
@@ -293,7 +322,7 @@ def agregar_capa_poligonos(mapa, gdf, nombre_capa, color='blue', fill_opacity=0.
 def crear_mapa_ndvi(gdf_resultados, mapa_base="ESRI World Imagery"):
     """Crea un mapa con visualización de NDVI"""
     
-    m = crear_mapa_base(gdf_resultados, mapa_base)
+    m = crear_mapa_base(gdf_resultados, mapa_base, zoom_start=12)
     
     # Función para determinar color basado en NDVI
     def estilo_ndvi(feature):
@@ -444,16 +473,17 @@ def dividir_potrero(gdf, n_zonas):
         return gdf
 
 # =============================================================================
-# SIDEBAR CON CONFIGURACIÓN SENTINEL HUB
+# SIDEBAR CON CONFIGURACIÓN SENTINEL HUB MEJORADA
 # =============================================================================
 
 with st.sidebar:
     st.header("⚙️ Configuración")
     
-    # Configuración Sentinel Hub
+    # Configuración Sentinel Hub - SOLO SI NO ESTÁ CONFIGURADO
     st.subheader("🛰️ Sentinel Hub")
     
     if not sh_configured:
+        st.error("❌ Sentinel Hub no configurado")
         with st.expander("🔐 Configurar Sentinel Hub", expanded=True):
             st.markdown("""
             **Para usar Sentinel Hub real necesitas:**
@@ -480,8 +510,13 @@ with st.sidebar:
             **📝 Nota:** Las credenciales se guardan solo en esta sesión.
             """)
     else:
-        st.success("✅ Sentinel Hub configurado")
+        st.success(sh_config.config_message)
         if st.button("🔄 Cambiar Credenciales"):
+            # Limpiar credenciales
+            if 'sh_client_id' in st.session_state:
+                del st.session_state.sh_client_id
+            if 'sh_client_secret' in st.session_state:
+                del st.session_state.sh_client_secret
             st.session_state.sh_configured = False
             st.rerun()
     
@@ -489,7 +524,7 @@ with st.sidebar:
     mapa_base = st.selectbox(
         "Seleccionar mapa base:",
         list(MAPAS_BASE.keys()),
-        index=0
+        index=0  # ESRI World Imagery como default
     )
     
     st.subheader("📅 Configuración Temporal")
@@ -656,14 +691,14 @@ def mostrar_resultados_sentinel_hub(gdf, config):
         st.subheader("🌿 MAPA DE NDVI")
         with st.spinner("Generando mapa..."):
             mapa_ndvi = crear_mapa_ndvi(gdf, mapa_base_seleccionado)
-            folium_static(mapa_ndvi, width=1000, height=600)
+            folium_static(mapa_ndvi, width=800, height=400)
     
     elif tipo_mapa == "Potrero Original":
         st.subheader("🗺️ POTRERO ORIGINAL")
         with st.spinner("Generando mapa..."):
-            mapa_original = crear_mapa_base(st.session_state.gdf_cargado, mapa_base_seleccionado)
+            mapa_original = crear_mapa_base(st.session_state.gdf_cargado, mapa_base_seleccionado, zoom_start=12)
             agregar_capa_poligonos(mapa_original, st.session_state.gdf_cargado, "Potrero Original", 'blue', 0.5)
-            folium_static(mapa_original, width=1000, height=600)
+            folium_static(mapa_original, width=800, height=400)
     
     elif tipo_mapa == "Comparación":
         st.subheader("🔍 COMPARACIÓN: ORIGINAL VS SUB-LOTES")
@@ -671,14 +706,14 @@ def mostrar_resultados_sentinel_hub(gdf, config):
         
         with col_comp1:
             st.markdown("**Potrero Original**")
-            mapa_orig = crear_mapa_base(st.session_state.gdf_cargado, mapa_base_seleccionado)
+            mapa_orig = crear_mapa_base(st.session_state.gdf_cargado, mapa_base_seleccionado, zoom_start=12)
             agregar_capa_poligonos(mapa_orig, st.session_state.gdf_cargado, "Original", 'blue', 0.5)
-            folium_static(mapa_orig, height=400)
+            folium_static(mapa_orig, height=300)
         
         with col_comp2:
             st.markdown("**Sub-Lotes con NDVI**")
             mapa_sublotes = crear_mapa_ndvi(gdf, mapa_base_seleccionado)
-            folium_static(mapa_sublotes, height=400)
+            folium_static(mapa_sublotes, height=300)
     
     # Tabla de resultados
     st.header("📋 DETALLES POR SUB-LOTE")
@@ -756,9 +791,9 @@ def main():
         # Mapa rápido del shapefile cargado
         st.subheader("🗺️ VISTA PREVIA DEL POTRERO")
         with st.spinner("Cargando mapa..."):
-            mapa_preview = crear_mapa_base(gdf, mapa_base)
+            mapa_preview = crear_mapa_base(gdf, mapa_base, zoom_start=11)
             agregar_capa_poligonos(mapa_preview, gdf, "Potrero Cargado", 'red', 0.5)
-            folium_static(mapa_preview, width=1000, height=400)
+            folium_static(mapa_preview, width=800, height=300)
         
         if st.button("🚀 EJECUTAR ANÁLISIS SENTINEL HUB", type="primary"):
             config = {
