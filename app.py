@@ -369,7 +369,7 @@ def get_color_ndvi(ndvi):
 # FUNCIONES DE VISUALIZACIÓN DE MAPAS CON ESCALAS AJUSTADAS
 # =============================================================================
 
-def crear_mapa_base(gdf, mapa_seleccionado="ESRI World Imagery", zoom_start=14):
+def crear_mapa_base(gdf, mapa_seleccionado="ESRI World Imagery", zoom_start=10):
     """Crea un mapa base con el estilo seleccionado - ZOOM MEJORADO"""
     
     # Calcular centro del mapa
@@ -439,7 +439,7 @@ def crear_leyenda_gradiente(titulo, colores, valores, unidades=""):
 def crear_mapa_ndvi(gdf_resultados, mapa_base="ESRI World Imagery"):
     """Crea un mapa con visualización de NDVI y leyenda de gradiente"""
     
-    m = crear_mapa_base(gdf_resultados, mapa_base, zoom_start=14)
+    m = crear_mapa_base(gdf_resultados, mapa_base, zoom_start=10)
     
     # Función para determinar color basado en NDVI
     def estilo_ndvi(feature):
@@ -484,7 +484,7 @@ def crear_mapa_ndvi(gdf_resultados, mapa_base="ESRI World Imagery"):
 def crear_mapa_ev_ha(gdf_resultados, mapa_base="ESRI World Imagery"):
     """Crea un mapa con visualización de EV/ha y leyenda de gradiente"""
     
-    m = crear_mapa_base(gdf_resultados, mapa_base, zoom_start=14)
+    m = crear_mapa_base(gdf_resultados, mapa_base, zoom_start=10)
     
     # Función para determinar color basado en EV/ha
     def estilo_ev_ha(feature):
@@ -529,7 +529,7 @@ def crear_mapa_ev_ha(gdf_resultados, mapa_base="ESRI World Imagery"):
 def crear_mapa_biomasa(gdf_resultados, mapa_base="ESRI World Imagery"):
     """Crea un mapa con visualización de Biomasa Forrajera y leyenda de gradiente"""
     
-    m = crear_mapa_base(gdf_resultados, mapa_base, zoom_start=14)
+    m = crear_mapa_base(gdf_resultados, mapa_base, zoom_start=10)
     
     # Función para determinar color basado en biomasa
     def estilo_biomasa(feature):
@@ -1069,7 +1069,7 @@ def main():
         # Mapa rápido del shapefile cargado
         st.subheader("🗺️ VISTA PREVIA DEL POTRERO")
         with st.spinner("Cargando mapa..."):
-            mapa_preview = crear_mapa_base(gdf, mapa_base, zoom_start=13)
+            mapa_preview = crear_mapa_base(gdf, mapa_base, zoom_start=10)
             agregar_capa_poligonos(mapa_preview, gdf, "Potrero Cargado", 'red', 0.5)
             folium_static(mapa_preview, width=800, height=400)
         
