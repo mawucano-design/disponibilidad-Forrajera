@@ -338,18 +338,20 @@ def get_color_ev_ha(ev_ha):
         return '#66BB6A'  # 🟢 Verde oscuro - > 16 EV/ha
 
 def get_color_biomasa(biomasa_kg_ms_ha):
-    """Obtiene color en gradiente para biomasa - NUEVA ESCALA"""
-    # NUEVA ESCALA según especificación
-    if biomasa_kg_ms_ha < 800:
-        return '#FF6B6B'  # 🔴 Rojo - < 800 kg MS/ha
+    """Obtiene color en gradiente para biomasa - ESCALA AJUSTADA"""
+    # ESCALA AJUSTADA según especificación
+    if biomasa_kg_ms_ha < 100:
+        return '#FF6B6B'  # 🔴 Rojo - < 100 kg MS/ha
+    elif biomasa_kg_ms_ha < 300:
+        return '#FF8A65'  # 🟠 Naranja claro - 100-300 kg MS/ha
+    elif biomasa_kg_ms_ha < 500:
+        return '#FFA726'  # 🟠 Naranja - 300-500 kg MS/ha
     elif biomasa_kg_ms_ha < 1000:
-        return '#FFA726'  # 🟠 Naranja - 800-1,000 kg MS/ha
+        return '#FFD54F'  # 🟡 Amarillo - 500-1,000 kg MS/ha
     elif biomasa_kg_ms_ha < 2000:
-        return '#FFD54F'  # 🟡 Amarillo - 1,000-2,000 kg MS/ha
-    elif biomasa_kg_ms_ha < 2500:
-        return '#AED581'  # 🟢 Verde claro - 2,000-2,500 kg MS/ha
+        return '#AED581'  # 🟢 Verde claro - 1,000-2,000 kg MS/ha
     else:
-        return '#66BB6A'  # 🟢 Verde oscuro - > 2,500 kg MS/ha
+        return '#66BB6A'  # 🟢 Verde oscuro - > 2,000 kg MS/ha
 
 def get_color_ndvi(ndvi):
     """Obtiene color en gradiente para NDVI"""
@@ -364,7 +366,7 @@ def get_color_ndvi(ndvi):
         return '#006400'  # Verde oscuro - Vegetación densa
 
 # =============================================================================
-# FUNCIONES DE VISUALIZACIÓN DE MAPAS CON NUEVAS ESCALAS
+# FUNCIONES DE VISUALIZACIÓN DE MAPAS CON ESCALAS AJUSTADAS
 # =============================================================================
 
 def crear_mapa_base(gdf, mapa_seleccionado="ESRI World Imagery", zoom_start=14):
@@ -558,9 +560,9 @@ def crear_mapa_biomasa(gdf_resultados, mapa_base="ESRI World Imagery"):
         )
     ).add_to(m)
     
-    # Leyenda de Biomasa con NUEVA ESCALA
-    colores_biomasa = ['#FF6B6B', '#FFA726', '#FFD54F', '#AED581', '#66BB6A']
-    valores_biomasa = ['0', '800', '1,000', '2,000', '2,500']
+    # Leyenda de Biomasa con ESCALA AJUSTADA
+    colores_biomasa = ['#FF6B6B', '#FF8A65', '#FFA726', '#FFD54F', '#AED581', '#66BB6A']
+    valores_biomasa = ['0', '100', '300', '500', '1,000', '2,000']
     leyenda_biomasa = crear_leyenda_gradiente("🌿 Biomasa Forrajera (kg MS/ha)", colores_biomasa, valores_biomasa)
     m.get_root().html.add_child(folium.Element(leyenda_biomasa))
     
@@ -948,12 +950,13 @@ def mostrar_resultados_sentinel_hub(gdf, config):
     with tab3:
         st.subheader("📊 BIOMASA FORRAJERA DISPONIBLE")
         st.info("""
-        **NUEVA ESCALA - Interpretación del mapa:**
-        - 🔴 **Rojo:** < 800 kg MS/ha - Biomasa muy baja
-        - 🟠 **Naranja:** 800-1,000 kg MS/ha - Biomasa baja
-        - 🟡 **Amarillo:** 1,000-2,000 kg MS/ha - Biomasa moderada
-        - 🟢 **Verde claro:** 2,000-2,500 kg MS/ha - Biomasa alta
-        - 🟢 **Verde oscuro:** > 2,500 kg MS/ha - Biomasa muy alta
+        **ESCALA AJUSTADA - Interpretación del mapa:**
+        - 🔴 **Rojo:** < 100 kg MS/ha - Biomasa muy baja
+        - 🟠 **Naranja claro:** 100-300 kg MS/ha - Biomasa baja
+        - 🟠 **Naranja:** 300-500 kg MS/ha - Biomasa moderada-baja
+        - 🟡 **Amarillo:** 500-1,000 kg MS/ha - Biomasa moderada
+        - 🟢 **Verde claro:** 1,000-2,000 kg MS/ha - Biomasa alta
+        - 🟢 **Verde oscuro:** > 2,000 kg MS/ha - Biomasa muy alta
         """)
         with st.spinner("Generando mapa de biomasa..."):
             mapa_biomasa = crear_mapa_biomasa(gdf, mapa_base)
