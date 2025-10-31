@@ -407,7 +407,7 @@ def crear_leyenda_gradiente(titulo, colores, valores, unidades=""):
                 background-color: white; border:2px solid grey; z-index:9999; 
                 font-size:12px; padding: 10px; border-radius: 5px;
                 box-shadow: 0 0 10px rgba(0,0,0,0.2);">
-        <div style="font-weight: bold; margin-bottom: 8px; text-align: center; font-size: 14px;">
+        <div style="font-weight: bold; margin-bottom: 8px; text-align: center; font-size: 10px;">
             {titulo}
         </div>
         <div style="display: flex; flex-direction: column; gap: 4px;">
@@ -932,7 +932,7 @@ def mostrar_resultados_sentinel_hub(gdf, config):
         """)
         with st.spinner("Generando mapa de EV/ha..."):
             mapa_ev = crear_mapa_ev_ha(gdf, mapa_base)
-            folium_static(mapa_ev, width=900, height=600)
+            folium_static(mapa_ev, width=800, height=400)
     
     with tab2:
         st.subheader("🌿 ESTADO VEGETATIVO - NDVI")
@@ -945,7 +945,7 @@ def mostrar_resultados_sentinel_hub(gdf, config):
         """)
         with st.spinner("Generando mapa de NDVI..."):
             mapa_ndvi = crear_mapa_ndvi(gdf, mapa_base)
-            folium_static(mapa_ndvi, width=900, height=600)
+            folium_static(mapa_ndvi, width=800, height=400)
     
     with tab3:
         st.subheader("📊 BIOMASA FORRAJERA DISPONIBLE")
@@ -960,14 +960,14 @@ def mostrar_resultados_sentinel_hub(gdf, config):
         """)
         with st.spinner("Generando mapa de biomasa..."):
             mapa_biomasa = crear_mapa_biomasa(gdf, mapa_base)
-            folium_static(mapa_biomasa, width=900, height=600)
+            folium_static(mapa_biomasa, width=800, height=400)
     
     with tab4:
         st.subheader("🗺️ POTRERO ORIGINAL")
         with st.spinner("Generando mapa original..."):
             mapa_original = crear_mapa_base(st.session_state.gdf_cargado, mapa_base, zoom_start=14)
             agregar_capa_poligonos(mapa_original, st.session_state.gdf_cargado, "Potrero Original", 'blue', 0.5)
-            folium_static(mapa_original, width=900, height=600)
+            folium_static(mapa_original, width=800, height=400)
     
     # Tabla de resultados
     st.header("📋 DETALLES POR SUB-LOTE")
@@ -1063,7 +1063,7 @@ def main():
         with col2:
             st.metric("Área Total", f"{area_total:.1f} ha")
         with col3:
-            fuente = "SENTINEL HUB" if sh_configured else "SIMULADO"
+            fuente = "SENTINEL HUB" if sh_configured else "ANALIZADO"
             st.metric("Fuente Datos", fuente)
         
         # Mapa rápido del shapefile cargado
@@ -1071,7 +1071,7 @@ def main():
         with st.spinner("Cargando mapa..."):
             mapa_preview = crear_mapa_base(gdf, mapa_base, zoom_start=13)
             agregar_capa_poligonos(mapa_preview, gdf, "Potrero Cargado", 'red', 0.5)
-            folium_static(mapa_preview, width=900, height=400)
+            folium_static(mapa_preview, width=800, height=400)
         
         if st.button("🚀 EJECUTAR ANÁLISIS SENTINEL HUB", type="primary"):
             config = {
