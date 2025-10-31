@@ -324,32 +324,32 @@ def calcular_carga_animal_total(ev_ha, area_ha):
     return ev_ha * area_ha
 
 def get_color_ev_ha(ev_ha):
-    """Obtiene color en gradiente para EV/ha"""
-    # Gradiente exacto según la especificación
+    """Obtiene color en gradiente para EV/ha - NUEVA ESCALA"""
+    # NUEVA ESCALA según especificación
     if ev_ha < 0.5:
-        return '#FF6B6B'  # 🔴 Rojo - Muy baja
-    elif ev_ha < 1.0:
-        return '#FFA726'  # 🟠 Naranja - Baja
-    elif ev_ha < 1.5:
-        return '#FFD54F'  # 🟡 Amarillo - Moderada
-    elif ev_ha < 2.0:
-        return '#AED581'  # 🟢 Verde claro - Alta
+        return '#FF6B6B'  # 🔴 Rojo - < 0.5 EV/ha
+    elif ev_ha < 4.0:
+        return '#FFA726'  # 🟠 Naranja - 0.5-4 EV/ha
+    elif ev_ha < 8.0:
+        return '#FFD54F'  # 🟡 Amarillo - 4-8 EV/ha
+    elif ev_ha < 16.0:
+        return '#AED581'  # 🟢 Verde claro - 8-16 EV/ha
     else:
-        return '#66BB6A'  # 🟢 Verde oscuro - Muy alta
+        return '#66BB6A'  # 🟢 Verde oscuro - > 16 EV/ha
 
 def get_color_biomasa(biomasa_kg_ms_ha):
-    """Obtiene color en gradiente para biomasa"""
-    # Gradiente exacto según la especificación
-    if biomasa_kg_ms_ha < 1000:
-        return '#FF6B6B'  # 🔴 Rojo - Muy baja
+    """Obtiene color en gradiente para biomasa - NUEVA ESCALA"""
+    # NUEVA ESCALA según especificación
+    if biomasa_kg_ms_ha < 800:
+        return '#FF6B6B'  # 🔴 Rojo - < 800 kg MS/ha
+    elif biomasa_kg_ms_ha < 1000:
+        return '#FFA726'  # 🟠 Naranja - 800-1,000 kg MS/ha
     elif biomasa_kg_ms_ha < 2000:
-        return '#FFA726'  # 🟠 Naranja - Baja
-    elif biomasa_kg_ms_ha < 3000:
-        return '#FFD54F'  # 🟡 Amarillo - Moderada
-    elif biomasa_kg_ms_ha < 4000:
-        return '#AED581'  # 🟢 Verde claro - Alta
+        return '#FFD54F'  # 🟡 Amarillo - 1,000-2,000 kg MS/ha
+    elif biomasa_kg_ms_ha < 2500:
+        return '#AED581'  # 🟢 Verde claro - 2,000-2,500 kg MS/ha
     else:
-        return '#66BB6A'  # 🟢 Verde oscuro - Muy alta
+        return '#66BB6A'  # 🟢 Verde oscuro - > 2,500 kg MS/ha
 
 def get_color_ndvi(ndvi):
     """Obtiene color en gradiente para NDVI"""
@@ -364,7 +364,7 @@ def get_color_ndvi(ndvi):
         return '#006400'  # Verde oscuro - Vegetación densa
 
 # =============================================================================
-# FUNCIONES DE VISUALIZACIÓN DE MAPAS MEJORADAS CON GRADIENTES CORRECTOS
+# FUNCIONES DE VISUALIZACIÓN DE MAPAS CON NUEVAS ESCALAS
 # =============================================================================
 
 def crear_mapa_base(gdf, mapa_seleccionado="ESRI World Imagery", zoom_start=14):
@@ -401,7 +401,7 @@ def crear_leyenda_gradiente(titulo, colores, valores, unidades=""):
     
     leyenda_html = f'''
     <div style="position: fixed; 
-                top: 10px; right: 10px; width: 250px; 
+                top: 10px; right: 10px; width: 280px; 
                 background-color: white; border:2px solid grey; z-index:9999; 
                 font-size:12px; padding: 10px; border-radius: 5px;
                 box-shadow: 0 0 10px rgba(0,0,0,0.2);">
@@ -513,9 +513,9 @@ def crear_mapa_ev_ha(gdf_resultados, mapa_base="ESRI World Imagery"):
         )
     ).add_to(m)
     
-    # Leyenda de EV/ha con gradiente EXACTO según especificación
+    # Leyenda de EV/ha con NUEVA ESCALA
     colores_ev = ['#FF6B6B', '#FFA726', '#FFD54F', '#AED581', '#66BB6A']
-    valores_ev = ['0.0', '0.5', '1.0', '1.5', '2.0']
+    valores_ev = ['0.0', '0.5', '4.0', '8.0', '16.0']
     leyenda_ev = crear_leyenda_gradiente("🐄 Capacidad de Carga (EV/ha)", colores_ev, valores_ev)
     m.get_root().html.add_child(folium.Element(leyenda_ev))
     
@@ -558,9 +558,9 @@ def crear_mapa_biomasa(gdf_resultados, mapa_base="ESRI World Imagery"):
         )
     ).add_to(m)
     
-    # Leyenda de Biomasa con gradiente EXACTO según especificación
+    # Leyenda de Biomasa con NUEVA ESCALA
     colores_biomasa = ['#FF6B6B', '#FFA726', '#FFD54F', '#AED581', '#66BB6A']
-    valores_biomasa = ['0', '1,000', '2,000', '3,000', '4,000']
+    valores_biomasa = ['0', '800', '1,000', '2,000', '2,500']
     leyenda_biomasa = crear_leyenda_gradiente("🌿 Biomasa Forrajera (kg MS/ha)", colores_biomasa, valores_biomasa)
     m.get_root().html.add_child(folium.Element(leyenda_biomasa))
     
@@ -921,12 +921,12 @@ def mostrar_resultados_sentinel_hub(gdf, config):
     with tab1:
         st.subheader("🐄 CAPACIDAD DE CARGA - EV/HA")
         st.info("""
-        **Interpretación del mapa:**
+        **NUEVA ESCALA - Interpretación del mapa:**
         - 🔴 **Rojo:** < 0.5 EV/ha - Capacidad muy baja
-        - 🟠 **Naranja:** 0.5-1.0 EV/ha - Capacidad baja  
-        - 🟡 **Amarillo:** 1.0-1.5 EV/ha - Capacidad moderada
-        - 🟢 **Verde claro:** 1.5-2.0 EV/ha - Capacidad alta
-        - 🟢 **Verde oscuro:** > 2.0 EV/ha - Capacidad muy alta
+        - 🟠 **Naranja:** 0.5-4 EV/ha - Capacidad baja  
+        - 🟡 **Amarillo:** 4-8 EV/ha - Capacidad moderada
+        - 🟢 **Verde claro:** 8-16 EV/ha - Capacidad alta
+        - 🟢 **Verde oscuro:** > 16 EV/ha - Capacidad muy alta
         """)
         with st.spinner("Generando mapa de EV/ha..."):
             mapa_ev = crear_mapa_ev_ha(gdf, mapa_base)
@@ -948,12 +948,12 @@ def mostrar_resultados_sentinel_hub(gdf, config):
     with tab3:
         st.subheader("📊 BIOMASA FORRAJERA DISPONIBLE")
         st.info("""
-        **Interpretación del mapa:**
-        - 🔴 **Rojo:** < 1,000 kg MS/ha - Biomasa muy baja
-        - 🟠 **Naranja:** 1,000-2,000 kg MS/ha - Biomasa baja
-        - 🟡 **Amarillo:** 2,000-3,000 kg MS/ha - Biomasa moderada
-        - 🟢 **Verde claro:** 3,000-4,000 kg MS/ha - Biomasa alta
-        - 🟢 **Verde oscuro:** > 4,000 kg MS/ha - Biomasa muy alta
+        **NUEVA ESCALA - Interpretación del mapa:**
+        - 🔴 **Rojo:** < 800 kg MS/ha - Biomasa muy baja
+        - 🟠 **Naranja:** 800-1,000 kg MS/ha - Biomasa baja
+        - 🟡 **Amarillo:** 1,000-2,000 kg MS/ha - Biomasa moderada
+        - 🟢 **Verde claro:** 2,000-2,500 kg MS/ha - Biomasa alta
+        - 🟢 **Verde oscuro:** > 2,500 kg MS/ha - Biomasa muy alta
         """)
         with st.spinner("Generando mapa de biomasa..."):
             mapa_biomasa = crear_mapa_biomasa(gdf, mapa_base)
@@ -975,13 +975,13 @@ def mostrar_resultados_sentinel_hub(gdf, config):
     # Resumen de capacidad de carga
     st.header("🐄 RESUMEN DE CAPACIDAD DE CARGA")
     
-    # Calcular distribución de EV/ha
+    # Calcular distribución de EV/ha según NUEVA ESCALA
     ev_categories = {
         'Muy Baja (< 0.5)': len(gdf[gdf['ev_ha'] < 0.5]),
-        'Baja (0.5-1.0)': len(gdf[(gdf['ev_ha'] >= 0.5) & (gdf['ev_ha'] < 1.0)]),
-        'Moderada (1.0-1.5)': len(gdf[(gdf['ev_ha'] >= 1.0) & (gdf['ev_ha'] < 1.5)]),
-        'Alta (1.5-2.0)': len(gdf[(gdf['ev_ha'] >= 1.5) & (gdf['ev_ha'] < 2.0)]),
-        'Muy Alta (> 2.0)': len(gdf[gdf['ev_ha'] >= 2.0])
+        'Baja (0.5-4)': len(gdf[(gdf['ev_ha'] >= 0.5) & (gdf['ev_ha'] < 4.0)]),
+        'Moderada (4-8)': len(gdf[(gdf['ev_ha'] >= 4.0) & (gdf['ev_ha'] < 8.0)]),
+        'Alta (8-16)': len(gdf[(gdf['ev_ha'] >= 8.0) & (gdf['ev_ha'] < 16.0)]),
+        'Muy Alta (> 16)': len(gdf[gdf['ev_ha'] >= 16.0])
     }
     
     col_carga1, col_carga2, col_carga3 = st.columns(3)
@@ -993,7 +993,7 @@ def mostrar_resultados_sentinel_hub(gdf, config):
         st.metric("Carga Total Potencial", f"{gdf['carga_animal'].sum():.0f} EV")
     
     with col_carga3:
-        alta_capacidad = ev_categories['Alta (1.5-2.0)'] + ev_categories['Muy Alta (> 2.0)']
+        alta_capacidad = ev_categories['Alta (8-16)'] + ev_categories['Muy Alta (> 16)']
         st.metric("Sub-Lotes con Alta Capacidad", f"{alta_capacidad}/{len(gdf)}")
     
     # Descarga
