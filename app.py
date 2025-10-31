@@ -41,6 +41,8 @@ if 'gdf_cargado' not in st.session_state:
     st.session_state.gdf_cargado = None
 if 'sh_configured' not in st.session_state:
     st.session_state.sh_configured = False
+if 'resultados_analisis' not in st.session_state:
+    st.session_state.resultados_analisis = None
 
 # =============================================================================
 # CONFIGURACIÓN SENTINEL HUB (sin credenciales hardcodeadas)
@@ -160,7 +162,7 @@ class SentinelHubProcessor:
             return 0.5  # Valor por defecto
 
 # =============================================================================
-# MAPAS BASE (igual que antes)
+# MAPAS BASE MEJORADOS
 # =============================================================================
 
 MAPAS_BASE = {
@@ -178,8 +180,162 @@ MAPAS_BASE = {
         "url": "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
         "attribution": "OpenStreetMap contributors",
         "name": "OSM"
+    },
+    "CartoDB Positron": {
+        "url": "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+        "attribution": "CartoDB",
+        "name": "CartoDB Light"
+    },
+    "CartoDB Dark Matter": {
+        "url": "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+        "attribution": "CartoDB",
+        "name": "CartoDB Dark"
+    },
+    "Stamen Terrain": {
+        "url": "https://stamen-tiles-{s}.a.ssl.fastly.net/terrain/{z}/{x}/{y}.jpg",
+        "attribution": "Stamen Design",
+        "name": "Stamen Terrain"
+    },
+    "Stamen Toner": {
+        "url": "https://stamen-tiles-{s}.a.ssl.fastly.net/toner/{z}/{x}/{y}.png",
+        "attribution": "Stamen Design",
+        "name": "Stamen Toner"
     }
 }
+
+# =============================================================================
+# FUNCIONES DE VISUALIZACIÓN DE MAPAS
+# =============================================================================
+
+def crear_mapa_base(gdf, mapa_seleccionado="ESRI World Imagery", zoom_start=14):
+    """Crea un mapa base con el estilo seleccionado"""
+    
+    # Calcular centro del mapa
+    bounds = gdf.total_bounds
+    center_lat = (bounds[1] + bounds[3]) / 2
+    center_lon = (bounds[0] + bounds[2]) / 2
+    
+    # Crear mapa
+    m = folium.Map(
+        location=[center_lat, center_lon],
+        zoom_start=zoom_start,
+        tiles=None,
+        control_scale=True
+    )
+    
+    # Añadir capa base seleccionada
+    mapa_config = MAPAS_BASE[mapa_seleccionado]
+    folium.TileLayer(
+        tiles=mapa_config["url"],
+        attr=mapa_config["attribution"],
+        name=mapa_config["name"],
+        control=True
+    ).add_to(m)
+    
+    # Añadir otras capas base como opciones
+    for nombre, config in MAPAS_BASE.items():
+        if nombre != mapa_seleccionado:
+            folium.TileLayer(
+                tiles=config["url"],
+                attr=config["attribution"],
+                name=config["name"],
+                control=True
+            ).add_to(m)
+    
+    return m
+
+def agregar_capa_poligonos(mapa, gdf, nombre_capa, color='blue', fill_opacity=0.3):
+    """Agrega una capa de polígonos al mapa"""
+    
+    def estilo_poligono(feature):
+        return {
+            'fillColor': color,
+            'color': 'black',
+            'weight': 2,
+            'fillOpacity': fill_opacity,
+            'opacity': 0.8
+        }
+    
+    folium.GeoJson(
+        gdf.__geo_interface__,
+        name=nombre_capa,
+        style_function=estilo_poligono,
+        tooltip=folium.GeoJsonTooltip(
+            fields=['id_subLote'] if 'id_subLote' in gdf.columns else [],
+            aliases=['Sub-Lote:'] if 'id_subLote' in gdf.columns else ['Polígono:'],
+            localize=True
+        )
+    ).add_to(mapa)
+
+def crear_mapa_ndvi(gdf_resultados, mapa_base="ESRI World Imagery"):
+    """Crea un mapa con visualización de NDVI"""
+    
+    m = crear_mapa_base(gdf_resultados, mapa_base)
+    
+    # Función para determinar color basado en NDVI
+    def estilo_ndvi(feature):
+        ndvi = feature['properties']['ndvi']
+        if ndvi < 0.2:
+            color = '#8B4513'  # Marrón - suelo desnudo
+        elif ndvi < 0.4:
+            color = '#FFD700'  # Amarillo - vegetación escasa
+        elif ndvi < 0.6:
+            color = '#32CD32'  # Verde claro - vegetación moderada
+        else:
+            color = '#006400'  # Verde oscuro - vegetación densa
+        
+        return {
+            'fillColor': color,
+            'color': 'black',
+            'weight': 1,
+            'fillOpacity': 0.7,
+            'opacity': 0.8
+        }
+    
+    # Función para tooltip
+    def tooltip_ndvi(feature):
+        ndvi = feature['properties']['ndvi']
+        area = feature['properties']['area_ha']
+        biomasa = feature['properties']['biomasa_kg_ms_ha']
+        return f"""
+        <b>Sub-Lote: {feature['properties']['id_subLote']}</b><br>
+        NDVI: {ndvi:.3f}<br>
+        Área: {area:.2f} ha<br>
+        Biomasa: {biomasa:.0f} kg MS/ha
+        """
+    
+    # Agregar capa de NDVI
+    folium.GeoJson(
+        gdf_resultados.__geo_interface__,
+        name='NDVI por Sub-Lote',
+        style_function=estilo_ndvi,
+        tooltip=folium.GeoJsonTooltip(
+            fields=['id_subLote', 'ndvi', 'area_ha', 'biomasa_kg_ms_ha'],
+            aliases=['Sub-Lote:', 'NDVI:', 'Área (ha):', 'Biomasa (kg MS/ha):'],
+            localize=True,
+            formatter=".3f"
+        )
+    ).add_to(m)
+    
+    # Agregar leyenda de NDVI
+    legend_html = '''
+    <div style="position: fixed; 
+                bottom: 50px; left: 50px; width: 200px; height: 150px; 
+                background-color: white; border:2px solid grey; z-index:9999; 
+                font-size:14px; padding: 10px">
+    <p><strong>Leyenda NDVI</strong></p>
+    <p><i style="background:#8B4513; width:20px; height:20px; display:inline-block; margin-right:5px"></i> < 0.2 (Suelo)</p>
+    <p><i style="background:#FFD700; width:20px; height:20px; display:inline-block; margin-right:5px"></i> 0.2-0.4 (Escasa)</p>
+    <p><i style="background:#32CD32; width:20px; height:20px; display:inline-block; margin-right:5px"></i> 0.4-0.6 (Moderada)</p>
+    <p><i style="background:#006400; width:20px; height:20px; display:inline-block; margin-right:5px"></i> > 0.6 (Densa)</p>
+    </div>
+    '''
+    m.get_root().html.add_child(folium.Element(legend_html))
+    
+    # Control de capas
+    folium.LayerControl().add_to(m)
+    
+    return m
 
 # =============================================================================
 # PARÁMETROS FORRAJEROS (igual que antes)
@@ -430,21 +586,24 @@ def analisis_con_sentinel_hub(gdf, config):
         
         progress_bar.empty()
         
+        # Añadir resultados al GeoDataFrame
+        for col in ['area_ha', 'ndvi', 'tipo_superficie', 'biomasa_kg_ms_ha', 'fuente']:
+            gdf_dividido[col] = [r[col] for r in resultados]
+        
+        # Guardar en session state
+        st.session_state.resultados_analisis = gdf_dividido
+        
         # Mostrar resultados
-        mostrar_resultados_sentinel_hub(gdf_dividido, resultados, config)
+        mostrar_resultados_sentinel_hub(gdf_dividido, config)
         return True
         
     except Exception as e:
         st.error(f"Error en análisis: {e}")
         return False
 
-def mostrar_resultados_sentinel_hub(gdf, resultados, config):
+def mostrar_resultados_sentinel_hub(gdf, config):
     """Muestra resultados con Sentinel Hub"""
     st.header("📊 RESULTADOS - SENTINEL HUB")
-    
-    # Añadir resultados al GeoDataFrame
-    for col in ['area_ha', 'ndvi', 'tipo_superficie', 'biomasa_kg_ms_ha', 'fuente']:
-        gdf[col] = [r[col] for r in resultados]
     
     # Métricas
     col1, col2, col3, col4 = st.columns(4)
@@ -465,21 +624,81 @@ def mostrar_resultados_sentinel_hub(gdf, resultados, config):
         datos_reales = len(gdf[gdf['fuente'] == 'SENTINEL_HUB'])
         st.metric("Datos Reales", f"{datos_reales}/{len(gdf)}")
     
+    # VISUALIZACIÓN DE MAPAS
+    st.header("🗺️ VISUALIZACIÓN EN MAPA")
+    
+    # Selección de tipo de mapa
+    col_map1, col_map2 = st.columns(2)
+    with col_map1:
+        tipo_mapa = st.selectbox(
+            "Tipo de visualización:",
+            ["NDVI por Sub-Lote", "Potrero Original", "Comparación"]
+        )
+    with col_map2:
+        mapa_base_seleccionado = st.selectbox(
+            "Mapa base:",
+            list(MAPAS_BASE.keys()),
+            index=0
+        )
+    
+    # Crear mapa según selección
+    if tipo_mapa == "NDVI por Sub-Lote":
+        st.subheader("🌿 MAPA DE NDVI")
+        with st.spinner("Generando mapa..."):
+            mapa_ndvi = crear_mapa_ndvi(gdf, mapa_base_seleccionado)
+            folium_static(mapa_ndvi, width=1000, height=600)
+    
+    elif tipo_mapa == "Potrero Original":
+        st.subheader("🗺️ POTRERO ORIGINAL")
+        with st.spinner("Generando mapa..."):
+            mapa_original = crear_mapa_base(st.session_state.gdf_cargado, mapa_base_seleccionado)
+            agregar_capa_poligonos(mapa_original, st.session_state.gdf_cargado, "Potrero Original", 'blue', 0.5)
+            folium_static(mapa_original, width=1000, height=600)
+    
+    elif tipo_mapa == "Comparación":
+        st.subheader("🔍 COMPARACIÓN: ORIGINAL VS SUB-LOTES")
+        col_comp1, col_comp2 = st.columns(2)
+        
+        with col_comp1:
+            st.markdown("**Potrero Original**")
+            mapa_orig = crear_mapa_base(st.session_state.gdf_cargado, mapa_base_seleccionado)
+            agregar_capa_poligonos(mapa_orig, st.session_state.gdf_cargado, "Original", 'blue', 0.5)
+            folium_static(mapa_orig, height=400)
+        
+        with col_comp2:
+            st.markdown("**Sub-Lotes con NDVI**")
+            mapa_sublotes = crear_mapa_ndvi(gdf, mapa_base_seleccionado)
+            folium_static(mapa_sublotes, height=400)
+    
     # Tabla de resultados
-    st.subheader("📋 DETALLES POR SUB-LOTE")
+    st.header("📋 DETALLES POR SUB-LOTE")
     tabla = gdf[['id_subLote', 'area_ha', 'tipo_superficie', 'ndvi', 'biomasa_kg_ms_ha', 'fuente']].copy()
     tabla.columns = ['Sub-Lote', 'Área (ha)', 'Tipo Superficie', 'NDVI', 'Biomasa (kg MS/ha)', 'Fuente']
     st.dataframe(tabla, use_container_width=True)
     
     # Descarga
-    st.subheader("💾 EXPORTAR RESULTADOS")
-    csv = tabla.to_csv(index=False)
-    st.download_button(
-        "📥 Descargar CSV",
-        csv,
-        f"resultados_sentinel_hub_{config['tipo_pastura']}.csv",
-        "text/csv"
-    )
+    st.header("💾 EXPORTAR RESULTADOS")
+    col_dl1, col_dl2 = st.columns(2)
+    
+    with col_dl1:
+        # CSV
+        csv = tabla.to_csv(index=False)
+        st.download_button(
+            "📥 Descargar CSV",
+            csv,
+            f"resultados_sentinel_hub_{config['tipo_pastura']}.csv",
+            "text/csv"
+        )
+    
+    with col_dl2:
+        # GeoJSON
+        geojson = gdf.to_json()
+        st.download_button(
+            "📥 Descargar GeoJSON",
+            geojson,
+            f"resultados_sentinel_hub_{config['tipo_pastura']}.geojson",
+            "application/json"
+        )
 
 # =============================================================================
 # INTERFAZ PRINCIPAL
@@ -523,6 +742,13 @@ def main():
         with col3:
             fuente = "SENTINEL HUB" if sh_configured else "SIMULADO"
             st.metric("Fuente Datos", fuente)
+        
+        # Mapa rápido del shapefile cargado
+        st.subheader("🗺️ VISTA PREVIA DEL POTRERO")
+        with st.spinner("Cargando mapa..."):
+            mapa_preview = crear_mapa_base(gdf, mapa_base)
+            agregar_capa_poligonos(mapa_preview, gdf, "Potrero Cargado", 'red', 0.5)
+            folium_static(mapa_preview, width=1000, height=400)
         
         if st.button("🚀 EJECUTAR ANÁLISIS SENTINEL HUB", type="primary"):
             config = {
