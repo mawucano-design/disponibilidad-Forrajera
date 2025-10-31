@@ -323,67 +323,65 @@ def calcular_carga_animal_total(ev_ha, area_ha):
     """
     return ev_ha * area_ha
 
-def clasificar_capacidad_carga(ev_ha):
-    """
-    Clasifica la capacidad de carga según EV/ha
-    """
+def get_color_ev_ha(ev_ha):
+    """Obtiene color en gradiente para EV/ha"""
+    # Gradiente de rojo (bajo) a verde (alto)
     if ev_ha < 0.5:
-        return "MUY BAJA", "#FF6B6B"
+        return '#FF6B6B'  # Rojo - Muy baja
     elif ev_ha < 1.0:
-        return "BAJA", "#FFA726"
+        return '#FFA726'  # Naranja - Baja
     elif ev_ha < 1.5:
-        return "MODERADA", "#FFD54F"
+        return '#FFD54F'  # Amarillo - Moderada
     elif ev_ha < 2.0:
-        return "ALTA", "#AED581"
+        return '#AED581'  # Verde claro - Alta
     else:
-        return "MUY ALTA", "#66BB6A"
+        return '#66BB6A'  # Verde - Muy alta
 
-def clasificar_biomasa(biomasa_kg_ms_ha):
-    """
-    Clasifica la biomasa forrajera
-    """
+def get_color_biomasa(biomasa_kg_ms_ha):
+    """Obtiene color en gradiente para biomasa"""
+    # Gradiente de rojo (bajo) a verde (alto)
     if biomasa_kg_ms_ha < 1000:
-        return "MUY BAJA", "#FF6B6B"
+        return '#FF6B6B'  # Rojo - Muy baja
     elif biomasa_kg_ms_ha < 2000:
-        return "BAJA", "#FFA726"
+        return '#FFA726'  # Naranja - Baja
     elif biomasa_kg_ms_ha < 3000:
-        return "MODERADA", "#FFD54F"
+        return '#FFD54F'  # Amarillo - Moderada
     elif biomasa_kg_ms_ha < 4000:
-        return "ALTA", "#AED581"
+        return '#AED581'  # Verde claro - Alta
     else:
-        return "MUY ALTA", "#66BB6A"
+        return '#66BB6A'  # Verde - Muy alta
 
-def clasificar_ndvi(ndvi):
-    """
-    Clasifica el NDVI
-    """
+def get_color_ndvi(ndvi):
+    """Obtiene color en gradiente para NDVI"""
+    # Gradiente de marrón (suelo) a verde oscuro (vegetación densa)
     if ndvi < 0.2:
-        return "SUELO DESNUDO", "#8B4513"
+        return '#8B4513'  # Marrón - Suelo desnudo
     elif ndvi < 0.4:
-        return "VEGETACIÓN ESCASA", "#FFD700"
+        return '#FFD700'  # Amarillo - Vegetación escasa
     elif ndvi < 0.6:
-        return "VEGETACIÓN MODERADA", "#32CD32"
+        return '#32CD32'  # Verde claro - Vegetación moderada
     else:
-        return "VEGETACIÓN DENSA", "#006400"
+        return '#006400'  # Verde oscuro - Vegetación densa
 
 # =============================================================================
-# FUNCIONES DE VISUALIZACIÓN DE MAPAS CORREGIDAS CON LEYENDAS
+# FUNCIONES DE VISUALIZACIÓN DE MAPAS MEJORADAS CON LEYENDAS DE GRADIENTE
 # =============================================================================
 
-def crear_mapa_base(gdf, mapa_seleccionado="ESRI World Imagery", zoom_start=12):
-    """Crea un mapa base con el estilo seleccionado - ESRI SATELLITE COMO DEFAULT"""
+def crear_mapa_base(gdf, mapa_seleccionado="ESRI World Imagery", zoom_start=14):
+    """Crea un mapa base con el estilo seleccionado - ZOOM MEJORADO"""
     
     # Calcular centro del mapa
     bounds = gdf.total_bounds
     center_lat = (bounds[1] + bounds[3]) / 2
     center_lon = (bounds[0] + bounds[2]) / 2
     
-    # Crear mapa
+    # Crear mapa con zoom mejorado
     m = folium.Map(
         location=[center_lat, center_lon],
         zoom_start=zoom_start,
         tiles=None,
-        control_scale=True
+        control_scale=True,
+        zoom_control=True
     )
     
     # Añadir TODAS las capas base pero marcar la seleccionada como activa
@@ -393,78 +391,58 @@ def crear_mapa_base(gdf, mapa_seleccionado="ESRI World Imagery", zoom_start=12):
             attr=config["attribution"],
             name=config["name"],
             control=True,
-            show=(nombre == mapa_seleccionado)  # SOLO el seleccionado se muestra por defecto
+            show=(nombre == mapa_seleccionado)
         ).add_to(m)
     
     return m
 
-def agregar_capa_poligonos(mapa, gdf, nombre_capa, color='blue', fill_opacity=0.3):
-    """Agrega una capa de polígonos al mapa - VERSIÓN CORREGIDA"""
+def crear_leyenda_gradiente(titulo, colores, valores, unidades=""):
+    """Crea una leyenda con gradiente de colores"""
     
-    def estilo_poligono(feature):
-        return {
-            'fillColor': color,
-            'color': 'black',
-            'weight': 2,
-            'fillOpacity': fill_opacity,
-            'opacity': 0.8
-        }
+    leyenda_html = f'''
+    <div style="position: fixed; 
+                top: 10px; right: 10px; width: 220px; 
+                background-color: white; border:2px solid grey; z-index:9999; 
+                font-size:12px; padding: 10px; border-radius: 5px;
+                box-shadow: 0 0 10px rgba(0,0,0,0.2);">
+        <div style="font-weight: bold; margin-bottom: 8px; text-align: center; font-size: 14px;">
+            {titulo}
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 2px;">
+    '''
     
-    # Verificar qué campos están disponibles para el tooltip
-    available_fields = []
-    available_aliases = []
+    # Crear barras de gradiente para cada rango
+    for i in range(len(colores)):
+        if i < len(valores) - 1:
+            leyenda_html += f'''
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+                <div style="width: 20px; height: 15px; background: {colores[i]}; border: 1px solid #000;"></div>
+                <span style="margin-left: 8px; flex-grow: 1;">{valores[i]} - {valores[i+1]}{unidades}</span>
+            </div>
+            '''
+        else:
+            leyenda_html += f'''
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+                <div style="width: 20px; height: 15px; background: {colores[i]}; border: 1px solid #000;"></div>
+                <span style="margin-left: 8px; flex-grow: 1;">>{valores[i]}{unidades}</span>
+            </div>
+            '''
     
-    # Campos comunes que podrían estar en el GeoDataFrame
-    possible_fields = ['id_subLote', 'id', 'nombre', 'name', 'area_ha', 'ndvi', 'ev_ha']
-    
-    for field in possible_fields:
-        if field in gdf.columns:
-            available_fields.append(field)
-            if field == 'id_subLote':
-                available_aliases.append('Sub-Lote:')
-            elif field == 'id':
-                available_aliases.append('ID:')
-            elif field == 'nombre':
-                available_aliases.append('Nombre:')
-            elif field == 'name':
-                available_aliases.append('Name:')
-            elif field == 'area_ha':
-                available_aliases.append('Área (ha):')
-            elif field == 'ndvi':
-                available_aliases.append('NDVI:')
-            elif field == 'ev_ha':
-                available_aliases.append('EV/ha:')
-    
-    # Si no hay campos específicos, usar un tooltip genérico
-    if not available_fields:
-        tooltip = folium.GeoJsonTooltip(
-            fields=[],
-            aliases=[],
-            localize=True
-        )
-    else:
-        tooltip = folium.GeoJsonTooltip(
-            fields=available_fields,
-            aliases=available_aliases,
-            localize=True
-        )
-    
-    folium.GeoJson(
-        gdf.__geo_interface__,
-        name=nombre_capa,
-        style_function=estilo_poligono,
-        tooltip=tooltip
-    ).add_to(mapa)
+    leyenda_html += '''
+        </div>
+    </div>
+    '''
+    return leyenda_html
 
 def crear_mapa_ndvi(gdf_resultados, mapa_base="ESRI World Imagery"):
-    """Crea un mapa con visualización de NDVI y leyenda integrada"""
+    """Crea un mapa con visualización de NDVI y leyenda de gradiente"""
     
-    m = crear_mapa_base(gdf_resultados, mapa_base, zoom_start=12)
+    m = crear_mapa_base(gdf_resultados, mapa_base, zoom_start=14)
     
     # Función para determinar color basado en NDVI
     def estilo_ndvi(feature):
         ndvi = feature['properties']['ndvi']
-        clasificacion, color = clasificar_ndvi(ndvi)
+        color = get_color_ndvi(ndvi)
         
         return {
             'fillColor': color,
@@ -482,24 +460,16 @@ def crear_mapa_ndvi(gdf_resultados, mapa_base="ESRI World Imagery"):
         tooltip=folium.GeoJsonTooltip(
             fields=['id_subLote', 'ndvi', 'area_ha', 'biomasa_kg_ms_ha', 'ev_ha'],
             aliases=['Sub-Lote:', 'NDVI:', 'Área (ha):', 'Biomasa (kg MS/ha):', 'EV/ha:'],
-            localize=True
+            localize=True,
+            style="background-color: white; border: 1px solid black; border-radius: 3px; padding: 5px;"
         )
     ).add_to(m)
     
-    # Agregar leyenda de NDVI en el lado derecho
-    legend_html = '''
-    <div style="position: fixed; 
-                top: 10px; right: 10px; width: 220px; height: 160px; 
-                background-color: white; border:2px solid grey; z-index:9999; 
-                font-size:12px; padding: 10px; border-radius: 5px;">
-    <p style="margin:0; font-weight:bold; font-size:14px;">🌿 Índice NDVI</p>
-    <p style="margin:2px 0;"><i style="background:#8B4513; width:15px; height:15px; display:inline-block; margin-right:5px; border:1px solid black"></i> < 0.2 (Suelo)</p>
-    <p style="margin:2px 0;"><i style="background:#FFD700; width:15px; height:15px; display:inline-block; margin-right:5px; border:1px solid black"></i> 0.2-0.4 (Escasa)</p>
-    <p style="margin:2px 0;"><i style="background:#32CD32; width:15px; height:15px; display:inline-block; margin-right:5px; border:1px solid black"></i> 0.4-0.6 (Moderada)</p>
-    <p style="margin:2px 0;"><i style="background:#006400; width:15px; height:15px; display:inline-block; margin-right:5px; border:1px solid black"></i> > 0.6 (Densa)</p>
-    </div>
-    '''
-    m.get_root().html.add_child(folium.Element(legend_html))
+    # Leyenda de NDVI con gradiente
+    colores_ndvi = ['#8B4513', '#FFD700', '#32CD32', '#006400']
+    valores_ndvi = [0.0, 0.2, 0.4, 0.6]
+    leyenda_ndvi = crear_leyenda_gradiente("🌿 Índice NDVI", colores_ndvi, valores_ndvi)
+    m.get_root().html.add_child(folium.Element(leyenda_ndvi))
     
     # Control de capas
     folium.LayerControl().add_to(m)
@@ -507,14 +477,14 @@ def crear_mapa_ndvi(gdf_resultados, mapa_base="ESRI World Imagery"):
     return m
 
 def crear_mapa_ev_ha(gdf_resultados, mapa_base="ESRI World Imagery"):
-    """Crea un mapa con visualización de EV/ha y leyenda integrada"""
+    """Crea un mapa con visualización de EV/ha y leyenda de gradiente"""
     
-    m = crear_mapa_base(gdf_resultados, mapa_base, zoom_start=12)
+    m = crear_mapa_base(gdf_resultados, mapa_base, zoom_start=14)
     
     # Función para determinar color basado en EV/ha
     def estilo_ev_ha(feature):
         ev_ha = feature['properties']['ev_ha']
-        clasificacion, color = clasificar_capacidad_carga(ev_ha)
+        color = get_color_ev_ha(ev_ha)
         
         return {
             'fillColor': color,
@@ -532,25 +502,16 @@ def crear_mapa_ev_ha(gdf_resultados, mapa_base="ESRI World Imagery"):
         tooltip=folium.GeoJsonTooltip(
             fields=['id_subLote', 'ev_ha', 'area_ha', 'biomasa_kg_ms_ha', 'carga_animal'],
             aliases=['Sub-Lote:', 'EV/ha:', 'Área (ha):', 'Biomasa (kg MS/ha):', 'Carga Animal:'],
-            localize=True
+            localize=True,
+            style="background-color: white; border: 1px solid black; border-radius: 3px; padding: 5px;"
         )
     ).add_to(m)
     
-    # Agregar leyenda de EV/ha en el lado derecho
-    legend_html = '''
-    <div style="position: fixed; 
-                top: 10px; right: 10px; width: 220px; height: 180px; 
-                background-color: white; border:2px solid grey; z-index:9999; 
-                font-size:12px; padding: 10px; border-radius: 5px;">
-    <p style="margin:0; font-weight:bold; font-size:14px;">🐄 Capacidad de Carga</p>
-    <p style="margin:2px 0;"><i style="background:#FF6B6B; width:15px; height:15px; display:inline-block; margin-right:5px; border:1px solid black"></i> < 0.5 (Muy Baja)</p>
-    <p style="margin:2px 0;"><i style="background:#FFA726; width:15px; height:15px; display:inline-block; margin-right:5px; border:1px solid black"></i> 0.5-1.0 (Baja)</p>
-    <p style="margin:2px 0;"><i style="background:#FFD54F; width:15px; height:15px; display:inline-block; margin-right:5px; border:1px solid black"></i> 1.0-1.5 (Moderada)</p>
-    <p style="margin:2px 0;"><i style="background:#AED581; width:15px; height:15px; display:inline-block; margin-right:5px; border:1px solid black"></i> 1.5-2.0 (Alta)</p>
-    <p style="margin:2px 0;"><i style="background:#66BB6A; width:15px; height:15px; display:inline-block; margin-right:5px; border:1px solid black"></i> > 2.0 (Muy Alta)</p>
-    </div>
-    '''
-    m.get_root().html.add_child(folium.Element(legend_html))
+    # Leyenda de EV/ha con gradiente
+    colores_ev = ['#FF6B6B', '#FFA726', '#FFD54F', '#AED581', '#66BB6A']
+    valores_ev = [0.0, 0.5, 1.0, 1.5, 2.0]
+    leyenda_ev = crear_leyenda_gradiente("🐄 Capacidad de Carga (EV/ha)", colores_ev, valores_ev)
+    m.get_root().html.add_child(folium.Element(leyenda_ev))
     
     # Control de capas
     folium.LayerControl().add_to(m)
@@ -558,14 +519,14 @@ def crear_mapa_ev_ha(gdf_resultados, mapa_base="ESRI World Imagery"):
     return m
 
 def crear_mapa_biomasa(gdf_resultados, mapa_base="ESRI World Imagery"):
-    """Crea un mapa con visualización de Biomasa Forrajera y leyenda integrada"""
+    """Crea un mapa con visualización de Biomasa Forrajera y leyenda de gradiente"""
     
-    m = crear_mapa_base(gdf_resultados, mapa_base, zoom_start=12)
+    m = crear_mapa_base(gdf_resultados, mapa_base, zoom_start=14)
     
     # Función para determinar color basado en biomasa
     def estilo_biomasa(feature):
         biomasa = feature['properties']['biomasa_kg_ms_ha']
-        clasificacion, color = clasificar_biomasa(biomasa)
+        color = get_color_biomasa(biomasa)
         
         return {
             'fillColor': color,
@@ -583,30 +544,70 @@ def crear_mapa_biomasa(gdf_resultados, mapa_base="ESRI World Imagery"):
         tooltip=folium.GeoJsonTooltip(
             fields=['id_subLote', 'biomasa_kg_ms_ha', 'area_ha', 'ndvi', 'ev_ha'],
             aliases=['Sub-Lote:', 'Biomasa (kg MS/ha):', 'Área (ha):', 'NDVI:', 'EV/ha:'],
-            localize=True
+            localize=True,
+            style="background-color: white; border: 1px solid black; border-radius: 3px; padding: 5px;"
         )
     ).add_to(m)
     
-    # Agregar leyenda de Biomasa en el lado derecho
-    legend_html = '''
-    <div style="position: fixed; 
-                top: 10px; right: 10px; width: 240px; height: 180px; 
-                background-color: white; border:2px solid grey; z-index:9999; 
-                font-size:12px; padding: 10px; border-radius: 5px;">
-    <p style="margin:0; font-weight:bold; font-size:14px;">🌿 Biomasa Forrajera</p>
-    <p style="margin:2px 0;"><i style="background:#FF6B6B; width:15px; height:15px; display:inline-block; margin-right:5px; border:1px solid black"></i> < 1000 (Muy Baja)</p>
-    <p style="margin:2px 0;"><i style="background:#FFA726; width:15px; height:15px; display:inline-block; margin-right:5px; border:1px solid black"></i> 1000-2000 (Baja)</p>
-    <p style="margin:2px 0;"><i style="background:#FFD54F; width:15px; height:15px; display:inline-block; margin-right:5px; border:1px solid black"></i> 2000-3000 (Moderada)</p>
-    <p style="margin:2px 0;"><i style="background:#AED581; width:15px; height:15px; display:inline-block; margin-right:5px; border:1px solid black"></i> 3000-4000 (Alta)</p>
-    <p style="margin:2px 0;"><i style="background:#66BB6A; width:15px; height:15px; display:inline-block; margin-right:5px; border:1px solid black"></i> > 4000 (Muy Alta)</p>
-    </div>
-    '''
-    m.get_root().html.add_child(folium.Element(legend_html))
+    # Leyenda de Biomasa con gradiente
+    colores_biomasa = ['#FF6B6B', '#FFA726', '#FFD54F', '#AED581', '#66BB6A']
+    valores_biomasa = [0, 1000, 2000, 3000, 4000]
+    leyenda_biomasa = crear_leyenda_gradiente("🌿 Biomasa Forrajera (kg MS/ha)", colores_biomasa, valores_biomasa)
+    m.get_root().html.add_child(folium.Element(leyenda_biomasa))
     
     # Control de capas
     folium.LayerControl().add_to(m)
     
     return m
+
+def agregar_capa_poligonos(mapa, gdf, nombre_capa, color='blue', fill_opacity=0.3):
+    """Agrega una capa de polígonos al mapa"""
+    
+    def estilo_poligono(feature):
+        return {
+            'fillColor': color,
+            'color': 'black',
+            'weight': 2,
+            'fillOpacity': fill_opacity,
+            'opacity': 0.8
+        }
+    
+    # Verificar qué campos están disponibles para el tooltip
+    available_fields = []
+    available_aliases = []
+    
+    possible_fields = ['id_subLote', 'id', 'nombre', 'name', 'area_ha']
+    
+    for field in possible_fields:
+        if field in gdf.columns:
+            available_fields.append(field)
+            if field == 'id_subLote':
+                available_aliases.append('Sub-Lote:')
+            elif field == 'id':
+                available_aliases.append('ID:')
+            elif field == 'nombre':
+                available_aliases.append('Nombre:')
+            elif field == 'name':
+                available_aliases.append('Name:')
+            elif field == 'area_ha':
+                available_aliases.append('Área (ha):')
+    
+    if not available_fields:
+        tooltip = folium.GeoJsonTooltip(fields=[], aliases=[], localize=True)
+    else:
+        tooltip = folium.GeoJsonTooltip(
+            fields=available_fields,
+            aliases=available_aliases,
+            localize=True,
+            style="background-color: white; border: 1px solid black; border-radius: 3px; padding: 5px;"
+        )
+    
+    folium.GeoJson(
+        gdf.__geo_interface__,
+        name=nombre_capa,
+        style_function=estilo_poligono,
+        tooltip=tooltip
+    ).add_to(mapa)
 
 # =============================================================================
 # FUNCIONES BÁSICAS
@@ -826,9 +827,6 @@ def analisis_con_sentinel_hub(gdf, config):
             
             ev_ha = calcular_ev_ha(biomasa_disponible, consumo_diario, eficiencia)
             carga_animal = calcular_carga_animal_total(ev_ha, area_ha)
-            clasificacion_ev, color_ev = clasificar_capacidad_carga(ev_ha)
-            clasificacion_bio, color_bio = clasificar_biomasa(biomasa_disponible)
-            clasificacion_ndvi, color_ndvi = clasificar_ndvi(ndvi)
             
             # Clasificar vegetación
             if ndvi is None:
@@ -852,12 +850,6 @@ def analisis_con_sentinel_hub(gdf, config):
                 'biomasa_kg_ms_ha': biomasa_disponible,
                 'ev_ha': ev_ha,
                 'carga_animal': carga_animal,
-                'clasificacion_carga': clasificacion_ev,
-                'color_carga': color_ev,
-                'clasificacion_biomasa': clasificacion_bio,
-                'color_biomasa': color_bio,
-                'clasificacion_ndvi': clasificacion_ndvi,
-                'color_ndvi': color_ndvi,
                 'fuente': fuente
             })
         
@@ -865,8 +857,7 @@ def analisis_con_sentinel_hub(gdf, config):
         
         # Añadir resultados al GeoDataFrame
         for col in ['area_ha', 'ndvi', 'tipo_superficie', 'biomasa_kg_ms_ha', 'ev_ha', 
-                   'carga_animal', 'clasificacion_carga', 'color_carga', 
-                   'clasificacion_biomasa', 'color_biomasa', 'clasificacion_ndvi', 'color_ndvi', 'fuente']:
+                   'carga_animal', 'fuente']:
             gdf_dividido[col] = [r[col] for r in resultados]
         
         # Guardar en session state
@@ -920,40 +911,69 @@ def mostrar_resultados_sentinel_hub(gdf, config):
     
     with tab1:
         st.subheader("🐄 CAPACIDAD DE CARGA - EV/HA")
+        st.info("""
+        **Interpretación del mapa:**
+        - 🔴 **Rojo:** < 0.5 EV/ha - Capacidad muy baja
+        - 🟠 **Naranja:** 0.5-1.0 EV/ha - Capacidad baja  
+        - 🟡 **Amarillo:** 1.0-1.5 EV/ha - Capacidad moderada
+        - 🟢 **Verde claro:** 1.5-2.0 EV/ha - Capacidad alta
+        - 🟢 **Verde oscuro:** > 2.0 EV/ha - Capacidad muy alta
+        """)
         with st.spinner("Generando mapa de EV/ha..."):
             mapa_ev = crear_mapa_ev_ha(gdf, mapa_base)
-            folium_static(mapa_ev, width=800, height=500)
+            folium_static(mapa_ev, width=900, height=600)
     
     with tab2:
         st.subheader("🌿 ESTADO VEGETATIVO - NDVI")
+        st.info("""
+        **Interpretación del mapa:**
+        - 🟤 **Marrón:** < 0.2 - Suelo desnudo o vegetación muy escasa
+        - 🟡 **Amarillo:** 0.2-0.4 - Vegetación escasa o estrés hídrico
+        - 🟢 **Verde claro:** 0.4-0.6 - Vegetación moderada y saludable
+        - 🟢 **Verde oscuro:** > 0.6 - Vegetación densa y muy saludable
+        """)
         with st.spinner("Generando mapa de NDVI..."):
             mapa_ndvi = crear_mapa_ndvi(gdf, mapa_base)
-            folium_static(mapa_ndvi, width=800, height=500)
+            folium_static(mapa_ndvi, width=900, height=600)
     
     with tab3:
         st.subheader("📊 BIOMASA FORRAJERA DISPONIBLE")
+        st.info("""
+        **Interpretación del mapa:**
+        - 🔴 **Rojo:** < 1,000 kg MS/ha - Biomasa muy baja
+        - 🟠 **Naranja:** 1,000-2,000 kg MS/ha - Biomasa baja
+        - 🟡 **Amarillo:** 2,000-3,000 kg MS/ha - Biomasa moderada
+        - 🟢 **Verde claro:** 3,000-4,000 kg MS/ha - Biomasa alta
+        - 🟢 **Verde oscuro:** > 4,000 kg MS/ha - Biomasa muy alta
+        """)
         with st.spinner("Generando mapa de biomasa..."):
             mapa_biomasa = crear_mapa_biomasa(gdf, mapa_base)
-            folium_static(mapa_biomasa, width=800, height=500)
+            folium_static(mapa_biomasa, width=900, height=600)
     
     with tab4:
         st.subheader("🗺️ POTRERO ORIGINAL")
         with st.spinner("Generando mapa original..."):
-            mapa_original = crear_mapa_base(st.session_state.gdf_cargado, mapa_base, zoom_start=12)
+            mapa_original = crear_mapa_base(st.session_state.gdf_cargado, mapa_base, zoom_start=14)
             agregar_capa_poligonos(mapa_original, st.session_state.gdf_cargado, "Potrero Original", 'blue', 0.5)
-            folium_static(mapa_original, width=800, height=500)
+            folium_static(mapa_original, width=900, height=600)
     
     # Tabla de resultados
     st.header("📋 DETALLES POR SUB-LOTE")
-    tabla = gdf[['id_subLote', 'area_ha', 'tipo_superficie', 'ndvi', 'biomasa_kg_ms_ha', 'ev_ha', 'carga_animal', 'clasificacion_carga']].copy()
-    tabla.columns = ['Sub-Lote', 'Área (ha)', 'Tipo Superficie', 'NDVI', 'Biomasa (kg MS/ha)', 'EV/ha', 'Carga Animal', 'Clasificación']
+    tabla = gdf[['id_subLote', 'area_ha', 'tipo_superficie', 'ndvi', 'biomasa_kg_ms_ha', 'ev_ha', 'carga_animal']].copy()
+    tabla.columns = ['Sub-Lote', 'Área (ha)', 'Tipo Superficie', 'NDVI', 'Biomasa (kg MS/ha)', 'EV/ha', 'Carga Animal']
     st.dataframe(tabla, use_container_width=True)
     
     # Resumen de capacidad de carga
     st.header("🐄 RESUMEN DE CAPACIDAD DE CARGA")
     
-    # Distribución de clasificaciones
-    distribucion = gdf['clasificacion_carga'].value_counts()
+    # Calcular distribución de EV/ha
+    ev_categories = {
+        'Muy Baja (< 0.5)': len(gdf[gdf['ev_ha'] < 0.5]),
+        'Baja (0.5-1.0)': len(gdf[(gdf['ev_ha'] >= 0.5) & (gdf['ev_ha'] < 1.0)]),
+        'Moderada (1.0-1.5)': len(gdf[(gdf['ev_ha'] >= 1.0) & (gdf['ev_ha'] < 1.5)]),
+        'Alta (1.5-2.0)': len(gdf[(gdf['ev_ha'] >= 1.5) & (gdf['ev_ha'] < 2.0)]),
+        'Muy Alta (> 2.0)': len(gdf[gdf['ev_ha'] >= 2.0])
+    }
     
     col_carga1, col_carga2, col_carga3 = st.columns(3)
     
@@ -964,8 +984,8 @@ def mostrar_resultados_sentinel_hub(gdf, config):
         st.metric("Carga Total Potencial", f"{gdf['carga_animal'].sum():.0f} EV")
     
     with col_carga3:
-        st.metric("Sub-Lotes con Alta Capacidad", 
-                 f"{len(gdf[gdf['clasificacion_carga'].isin(['ALTA', 'MUY ALTA'])])}/{len(gdf)}")
+        alta_capacidad = ev_categories['Alta (1.5-2.0)'] + ev_categories['Muy Alta (> 2.0)']
+        st.metric("Sub-Lotes con Alta Capacidad", f"{alta_capacidad}/{len(gdf)}")
     
     # Descarga
     st.header("💾 EXPORTAR RESULTADOS")
@@ -1037,9 +1057,9 @@ def main():
         # Mapa rápido del shapefile cargado
         st.subheader("🗺️ VISTA PREVIA DEL POTRERO")
         with st.spinner("Cargando mapa..."):
-            mapa_preview = crear_mapa_base(gdf, mapa_base, zoom_start=11)
+            mapa_preview = crear_mapa_base(gdf, mapa_base, zoom_start=13)
             agregar_capa_poligonos(mapa_preview, gdf, "Potrero Cargado", 'red', 0.5)
-            folium_static(mapa_preview, width=800, height=300)
+            folium_static(mapa_preview, width=900, height=400)
         
         if st.button("🚀 EJECUTAR ANÁLISIS SENTINEL HUB", type="primary"):
             config = {
